@@ -33,6 +33,15 @@ def main():
         cfg=(cfg,),
     )
 
-# python tools/train.py --config-file configs/my_dataset/keypoint_ptv3.py
+"""
+## 基于PointTransformerV3的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_ptv3.py
+## 基于PointTransformerV3的关键点预测模型从中断点恢复训练
+python tools/train.py --config-file configs/my_dataset/keypoint_ptv3.py --options resume=True weight=exp/default/model/model_last.pth
+
+## 基于OctFormer的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_octformer.py 
+
+"""
 if __name__ == "__main__":
     main()

@@ -248,7 +248,7 @@ def inference_batch(cfg, model, dataset, args):
         dataset, 
         batch_size=cfg.data.batch_size if hasattr(cfg.data, "batch_size") else 1,
         shuffle=False, 
-        num_workers=cfg.data.num_workers, 
+        num_workers=cfg.num_worker, 
         collate_fn=point_collate_fn,
         pin_memory=True
     )
@@ -344,6 +344,7 @@ def main():
 
 
 """
+## 基于 Pointcept-PTv3 模型的推理脚本
 python tools/inference.py \
     --config-file configs/my_dataset/keypoint_ptv3.py \
     --weights exp/default/model/model_best.pth \
@@ -352,6 +353,46 @@ python tools/inference.py \
     --visualize \
     --sphere-radius 0.02 \
     --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 189
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 27.85135            | 20.03409
+KP 1            | 25.37834            | 13.91481
+KP 2            | 24.22221            | 14.08666
+KP 3            | 22.77517            | 12.97524
+KP 4            | 28.28257            | 19.71254
+KP 5            | 34.74160            | 20.48374
+-----------------------------------------------------------------
+OVERALL         | 27.20854
+-----------------------------------------------------------------
+
+
+
+## 基于 Pointcept-OctFormer 模型的推理脚本
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_octformer.py \
+    --weights exp/keypoint_octformer/model/model_best.pth \
+    --subset train \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 189
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 37.02726            | 22.72483
+KP 1            | 28.80403            | 15.91867
+KP 2            | 26.02955            | 15.05246
+KP 3            | 24.65556            | 15.45722
+KP 4            | 32.01264            | 18.57362
+KP 5            | 42.57084            | 17.32815
+-----------------------------------------------------------------
+OVERALL         | 31.84998
+-----------------------------------------------------------------
 """
 if __name__ == "__main__":
     main()

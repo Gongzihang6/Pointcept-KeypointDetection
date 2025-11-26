@@ -49,12 +49,13 @@ model = dict(
 # ==============================================================================
 # Data Settings (最终修正版)
 # ==============================================================================
+num_worker=4
+batch_size=8
 data_root = "/home/gzh/point/DataSets"
 grid_size_val = 0.02
 data = dict(
     
-    num_workers=4,
-    batch_size=8, 
+
     train=dict(
         type="KeypointDataset",
         split="train",
