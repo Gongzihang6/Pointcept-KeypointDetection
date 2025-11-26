@@ -22,6 +22,8 @@ def collate_fn(batch):
         raise TypeError(f"{batch.dtype} is not supported.")
 
     if isinstance(batch[0], torch.Tensor):
+        if batch[0].ndim == 0:
+            return torch.stack(list(batch))
         return torch.cat(list(batch))
     elif isinstance(batch[0], str):
         # str is also a kind of Sequence, judgement should before Sequence

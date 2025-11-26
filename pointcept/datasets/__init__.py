@@ -22,3 +22,6 @@ from .shapenet_part import ShapeNetPartDataset
 
 # dataloader
 from .dataloader import MultiDatasetDataloader
+
+# keypoint
+from .keypoint_dataset import KeypointDataset

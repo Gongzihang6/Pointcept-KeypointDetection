@@ -33,6 +33,6 @@ def main():
         cfg=(cfg,),
     )
 
-
+# python tools/train.py --config-file configs/my_dataset/keypoint_ptv3.py
 if __name__ == "__main__":
     main()

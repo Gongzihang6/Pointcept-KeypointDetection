@@ -218,11 +218,10 @@ data = dict(
 # hooks
 hooks = [
     dict(type="CheckpointLoader"),
-    dict(type="IterationTimer", warmup_iter=2),
+    dict(type="IterationTimer", warmup_iter=100),
     dict(type="InformationWriter"),
-    dict(type="ClsEvaluator"),
-    dict(type="CheckpointSaver", save_freq=None),
-    dict(type="PreciseEvaluator", test_last=False),
+    # [修正] 将 save_interval 改为 save_freq (单位通常是 Epoch)
+    dict(type="CheckpointSaver", save_freq=5) 
 ]
 
 # tester

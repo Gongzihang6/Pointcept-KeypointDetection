@@ -11,6 +11,9 @@ from .stratified_transformer import *
 from .spvcnn import *
 from .octformer import *
 from .oacnns import *
+from .keypoint_ptv3 import KeypointPTv3     # 基于PointTransformerV3的关键点检测模型
+
+
 
 # from .swin3d import *
 
