@@ -15,6 +15,20 @@ from pointcept.models.builder import MODELS
 
 
 class PointTransformerCls(nn.Module):
+    """
+    point transformer v1 进行对象分类
+    
+    Args:
+        block (nn.Module): 瓶颈块 Bottleneck
+        blocks (list): 每个阶段的瓶颈块数量
+        in_channels (int, optional): 输入点云的初始特征维度
+        planes 定义了网络 5 个阶段（Stage）的输出特征维度（通道数）
+        strides 定义了每个阶段的下采样率（Downsampling Rate）
+        nsample 定义了每个阶段的 k-近邻算法（kNN）中的 k 值，即每个点的局部邻域包含多少个邻居点。
+        num_classes (int, optional): 分类的类别数. Defaults to 40.
+
+        share_planes (8) 这是 向量自注意力（Vector Attention） 机制的一个实现参数，用于控制注意力向量的粒度（分组数量）
+    """
     def __init__(self, block, blocks, in_channels=6, num_classes=40):
         super().__init__()
         self.in_channels = in_channels
@@ -23,43 +37,43 @@ class PointTransformerCls(nn.Module):
         stride, nsample = [1, 4, 4, 4, 4], [8, 16, 16, 16, 16]
         self.enc1 = self._make_enc(
             block,
-            planes[0],
+            planes[0],  # 32
             blocks[0],
-            share_planes,
-            stride=stride[0],
-            nsample=nsample[0],
+            share_planes,   # 8
+            stride=stride[0],   # 1
+            nsample=nsample[0],  # 8
         )  # N/1
         self.enc2 = self._make_enc(
             block,
-            planes[1],
+            planes[1],  # 64
             blocks[1],
-            share_planes,
-            stride=stride[1],
-            nsample=nsample[1],
+            share_planes,   # 8
+            stride=stride[1],   # 4
+            nsample=nsample[1],  # 16
         )  # N/4
         self.enc3 = self._make_enc(
             block,
-            planes[2],
+            planes[2],  # 128
             blocks[2],
-            share_planes,
-            stride=stride[2],
-            nsample=nsample[2],
+            share_planes,   # 8
+            stride=stride[2],   # 4
+            nsample=nsample[2],  # 16
         )  # N/16
         self.enc4 = self._make_enc(
             block,
-            planes[3],
+            planes[3],  # 256
             blocks[3],
-            share_planes,
-            stride=stride[3],
-            nsample=nsample[3],
+            share_planes,    # 8
+            stride=stride[3],   # 4
+            nsample=nsample[3],  # 16
         )  # N/64
         self.enc5 = self._make_enc(
             block,
-            planes[4],
+            planes[4],  # 512
             blocks[4],
-            share_planes,
-            stride=stride[4],
-            nsample=nsample[4],
+            share_planes,    # 8
+            stride=stride[4],   # 4
+            nsample=nsample[4],  # 16
         )  # N/256
         self.cls = nn.Sequential(
             nn.Linear(planes[4], 256),
@@ -72,7 +86,7 @@ class PointTransformerCls(nn.Module):
             nn.Dropout(p=0.5),
             nn.Linear(128, num_classes),
         )
-
+    # share_planes (8) 这是 向量自注意力（Vector Attention） 机制的一个实现参数，用于控制注意力向量的粒度（分组数量）
     def _make_enc(self, block, planes, blocks, share_planes=8, stride=1, nsample=16):
         layers = [
             TransitionDown(self.in_planes, planes * block.expansion, stride, nsample)
@@ -85,15 +99,15 @@ class PointTransformerCls(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, data_dict):
-        p0 = data_dict["coord"]
-        x0 = data_dict["feat"]
-        o0 = data_dict["offset"].int()
+        p0 = data_dict["coord"]     # n 3
+        x0 = data_dict["feat"]      # n c
+        o0 = data_dict["offset"].int()      # b 1
         x0 = p0 if self.in_channels == 3 else torch.cat((p0, x0), 1)
-        p1, x1, o1 = self.enc1([p0, x0, o0])
-        p2, x2, o2 = self.enc2([p1, x1, o1])
-        p3, x3, o3 = self.enc3([p2, x2, o2])
-        p4, x4, o4 = self.enc4([p3, x3, o3])
-        p5, x5, o5 = self.enc5([p4, x4, o4])
+        p1, x1, o1 = self.enc1([p0, x0, o0])    # n 32
+        p2, x2, o2 = self.enc2([p1, x1, o1])    # n 64
+        p3, x3, o3 = self.enc3([p2, x2, o2])    # n 128
+        p4, x4, o4 = self.enc4([p3, x3, o3])    # n 256
+        p5, x5, o5 = self.enc5([p4, x4, o4])    # n 512
         x = []
         for i in range(o5.shape[0]):
             if i == 0:

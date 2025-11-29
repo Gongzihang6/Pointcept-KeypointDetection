@@ -348,7 +348,7 @@ def main():
 python tools/inference.py \
     --config-file configs/my_dataset/keypoint_ptv3.py \
     --weights exp/default/model/model_best.pth \
-    --subset train \
+    --subset test \
     --idx -1 \
     --visualize \
     --sphere-radius 0.02 \
@@ -374,25 +374,51 @@ OVERALL         | 27.20854
 python tools/inference.py \
     --config-file configs/my_dataset/keypoint_octformer.py \
     --weights exp/keypoint_octformer/model/model_best.pth \
-    --subset train \
+    --subset test \
     --idx -1 \
     --visualize \
     --sphere-radius 0.02 \
     --cube-size 0.02
 ====== Batch Inference Statistics ======
-Total Samples: 189
+Total Samples: 28
 -----------------------------------------------------------------
 Keypoint ID     | Mean Error           | Std Dev             
 -----------------------------------------------------------------
-KP 0            | 37.02726            | 22.72483
-KP 1            | 28.80403            | 15.91867
-KP 2            | 26.02955            | 15.05246
-KP 3            | 24.65556            | 15.45722
-KP 4            | 32.01264            | 18.57362
-KP 5            | 42.57084            | 17.32815
+KP 0            | 33.27346            | 16.75899
+KP 1            | 26.27490            | 15.12749
+KP 2            | 31.13291            | 19.68741
+KP 3            | 27.60023            | 18.44568
+KP 4            | 32.59894            | 17.00893
+KP 5            | 38.96297            | 19.05381
 -----------------------------------------------------------------
-OVERALL         | 31.84998
+OVERALL         | 31.64057
 -----------------------------------------------------------------
+
+## 基于 Pointcept-PTv1 模型的推理脚本
+export PYTHONPATH=.
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_ptv1.py \
+    --weights exp/keypoint_ptv1/model/model_best.pth \
+    --subset test \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 28
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 26.13216            | 11.06119
+KP 1            | 24.93169            | 17.54638
+KP 2            | 31.74557            | 21.16514
+KP 3            | 24.36304            | 16.39521
+KP 4            | 22.96082            | 11.83866
+KP 5            | 32.36544            | 11.43148
+-----------------------------------------------------------------
+OVERALL         | 27.08312
+-----------------------------------------------------------------
+
 """
 if __name__ == "__main__":
     main()

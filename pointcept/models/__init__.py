@@ -13,7 +13,7 @@ from .octformer import *
 from .oacnns import *
 from .keypoint_ptv3 import KeypointPTv3     # 基于PointTransformerV3的关键点检测模型
 from .keypoint_octformer import KeypointOctFormer     # 基于OctFormer的关键点检测模型
-
+from .keypoint_ptv1 import KeypointPTv1     # 基于PointTransformerV1的关键点检测模型
 
 # from .swin3d import *
 

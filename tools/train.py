@@ -42,6 +42,9 @@ python tools/train.py --config-file configs/my_dataset/keypoint_ptv3.py --option
 ## 基于OctFormer的关键点预测模型
 python tools/train.py --config-file configs/my_dataset/keypoint_octformer.py 
 
+## 基于PointTransformerV1的关键点预测模型
+export PYTHONPATH=.
+python tools/train.py --config-file configs/my_dataset/keypoint_ptv1.py
 """
 if __name__ == "__main__":
     main()

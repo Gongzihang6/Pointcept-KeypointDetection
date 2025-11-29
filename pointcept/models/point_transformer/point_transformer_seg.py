@@ -17,6 +17,48 @@ from .utils import LayerNorm1d
 
 
 class PointTransformerLayer(nn.Module):
+    """
+    point transformer层
+    “体会基于MLP的向量自注意力机制和普通的自注意力机制的差异”
+    根据论文中fig 2结构，本质上就是对输入点云进行如下操作：
+    1、对输入点云的特征x进行线性变换，得到查询点、键点、值点的特征表示；
+    2、对键点和值点进行knn_and_group操作，得到每个查询点的nsample个最近邻键点的特征表示；
+                 Input: (p, x, o)
+                        |
+      +-----------------+-----------------+
+      |                 |                 |
+ [linear_q]        [linear_k]        [linear_v]
+      |                 |                 |
+     x_q               x_k               x_v
+      |                 |                 |
+      |          [ KNN & Grouping ] <-----+--- (uses p, o)
+      |           /     |             \
+      |    (neighbors) (neighbors)  (relative p)
+      |      x_k       x_v             p_r
+      |       |         |               |
+      |       |         |          [linear_p]
+      |       |         |               |
+      |       |         |               v (pos encoding)
+      |       |         |           +---+---+
+      |       |         |           |       |
+      v       v         |           v       v
+   (x_k - x_q + p_r)    |        (x_v  +  p_r)
+          |             |               |
+       (r_qk)           |               |
+          |             |               |
+      [linear_w]        |               |
+          |             |               |
+      [Softmax]         |               |
+          |             |               |
+        (w)             |               |
+          \             |               /
+           \-----------(⊗)-------------/
+                        |
+                  [ einsum ] (Weighted Sum)
+                        |
+                        v
+                      Output: (p, x, o)
+    """
     def __init__(self, in_planes, out_planes, share_planes=8, nsample=16):
         super().__init__()
         self.mid_planes = mid_planes = out_planes // 1
@@ -45,7 +87,7 @@ class PointTransformerLayer(nn.Module):
     def forward(self, pxo) -> torch.Tensor:
         p, x, o = pxo  # (n, 3), (n, c), (b)
         x_q, x_k, x_v = self.linear_q(x), self.linear_k(x), self.linear_v(x)
-        x_k, idx = pointops.knn_query_and_group(
+        x_k, idx = pointops.knn_query_and_group(    # 进行KNN查询最近的nsample个点
             x_k, p, o, new_xyz=p, new_offset=o, nsample=self.nsample, with_xyz=True
         )
         x_v, _ = pointops.knn_query_and_group(
@@ -59,26 +101,61 @@ class PointTransformerLayer(nn.Module):
             with_xyz=False,
         )
         p_r, x_k = x_k[:, :, 0:3], x_k[:, :, 3:]
-        p_r = self.linear_p(p_r)
+        p_r = self.linear_p(p_r)    # 对坐标进行位置编码
         r_qk = (
-            x_k
-            - x_q.unsqueeze(1)
+            x_k     # n k c
+            - x_q.unsqueeze(1)  # n 1 c 在中间邻居点数量维度上增加一维，自动进行广播，计算中心点与每个邻居点之间的特征差异
             + einops.reduce(
-                p_r, "n ns (i j) -> n ns j", reduction="sum", j=self.mid_planes
+                p_r, "n ns (i j) -> n ns j", reduction="sum", j=self.mid_planes     # n k c
             )
         )
-        w = self.linear_w(r_qk)  # (n, nsample, c)
+        w = self.linear_w(r_qk)  # (n, nsample, c/s)
         w = self.softmax(w)
         x = torch.einsum(
             "n t s i, n t i -> n s i",
-            einops.rearrange(x_v + p_r, "n ns (s i) -> n ns s i", s=self.share_planes),
-            w,
+            einops.rearrange(x_v + p_r, "n ns (s i) -> n ns s i", s=self.share_planes),     # n k s c/s
+            w,  # n k c/s 自动广播 到 n k s c/s ，相当于把特征分为s个部分，每个部分的权重不同，组内权重共享
         )
-        x = einops.rearrange(x, "n s i -> n (s i)")
+        x = einops.rearrange(x, "n s i -> n (s i)")     # n c
         return x
 
 
 class TransitionDown(nn.Module):
+    """
+    下采样层，用于将输入的点云特征进行下采样
+    input: pxo: (p, x, o)
+    output: (n, x, o)
+
+    Input: p(N,3), x(N,C), o(B)
+        |       |
+        |       v
+        |   [ Check Stride > 1 ]
+        |       |
+        +-------+------------------------+
+        |                                |
+        v (FPS)                          v (KNN)
+    [ Farthest Point Sample ]        [ Grouping ]
+        |                    >------->  |
+        v (indices)          |           v (Local Region)
+        (idx)                |  Feature: (M, K, C+3)
+        |                    |           | (C features + 3 rel pos)
+        v                    |           v
+    [ New Coordinates ]      |        [ Linear ]
+        n_p (M, 3) ----------^           |
+        |                           [ BN + ReLU ]
+        |                                |
+        |                           Feature: (M, K, C_out)
+        |                                |
+        |                           [ Max Pool ] (on K dim)
+        |                                |
+        v                                v
+        n_p (M, 3)                     x_new (M, C_out)
+        |                                |
+        +---------------+----------------+
+                        |
+                Output: [n_p, x_new, n_o]
+
+    """
     def __init__(self, in_planes, out_planes, stride=1, nsample=16):
         super().__init__()
         self.stride, self.nsample = stride, nsample
@@ -93,33 +170,80 @@ class TransitionDown(nn.Module):
     def forward(self, pxo):
         p, x, o = pxo  # (n, 3), (n, c), (b)
         if self.stride != 1:
-            n_o, count = [o[0].item() // self.stride], o[0].item() // self.stride
+            n_o, count = [o[0].item() // self.stride], o[0].item() // self.stride   # 计算下采样后的点云数量
             for i in range(1, o.shape[0]):
                 count += (o[i].item() - o[i - 1].item()) // self.stride
                 n_o.append(count)
             n_o = torch.cuda.IntTensor(n_o)
+
+            # [核心操作 1] 最远点采样 (FPS)
+            # 从原始点云 p 中，根据 n_o 规定的数量，采样出分布最远的关键点索引 idx
+            # idx 形状为 (m)，m 是下采样后的总点数，下采样后的总点数由stride决定
             idx = pointops.farthest_point_sampling(p, o, n_o)  # (m)
+            # 获取采样后的新坐标 n_p，形状 (m, 3)
             n_p = p[idx.long(), :]  # (m, 3)
+
+            # [核心操作 2] kNN 查询与分组
+            # 对于每个新点 n_p，在老点 p 中找到最近的 nsample 个邻居
+            # 并将邻居的特征聚集起来，knn查询的邻域点数量由nsample决定
             x, _ = pointops.knn_query_and_group(
-                x,
-                p,
-                offset=o,
-                new_xyz=n_p,
-                new_offset=n_o,
-                nsample=self.nsample,
-                with_xyz=True,
-            )
+                x,                      # 输入特征
+                p,                      # 输入坐标
+                offset=o,               # 输入 offset
+                new_xyz=n_p,            # 中心点坐标 (新的点)
+                new_offset=n_o,         # 中心点 offset
+                nsample=self.nsample,   # kNN 的 k (如 16)
+                with_xyz=True,          # 关键参数：True 表示返回的特征中包含相对坐标 (p_neighbor - p_center)
+            )   # 此时 x 的形状通常为 (m, nsample, 3 + c)
             x = self.relu(
                 self.bn(self.linear(x).transpose(1, 2).contiguous())
-            )  # (m, c, nsample)
-            x = self.pool(x).squeeze(-1)  # (m, c)
-            p, o = n_p, n_o
-        else:
-            x = self.relu(self.bn(self.linear(x)))  # (n, c)
+            )  # (m, c_out, nsample)
+            x = self.pool(x).squeeze(-1)  # (m, c_out)
+            p, o = n_p, n_o     # m 3  m
+        else:   # 如果步长stride为1，不进行下采样，直接进行线性变换
+            x = self.relu(self.bn(self.linear(x)))  # (n, c_out)
         return [p, x, o]
 
 
 class TransitionUp(nn.Module):
+    """
+    上采样层，用于将输入的点云特征进行上采样
+    input: pxo1: (p, x, o)
+    output: (n, x, o)
+
+    
+    Structure (Mode 1: Upsampling / Interpolation):
+          Target (Fine)                Source (Coarse)
+          (p1, x1, o1)                  (p2, x2, o2)
+               |                             |
+               |                       [ Linear 2 ]
+               |                             |
+               |                   [ Point Interpolation ]
+               |                (Map features from p2 to p1)
+               |                             |
+               v                             |
+          [ Linear 1 ]                       |
+               |                             |
+               v                             v
+               +------------> ( + ) <--------+
+                                |
+                             Output
+
+    Structure (Mode 2: Global Aggregation - if pxo2 is None):
+                  Input: x (Local Features)
+                            |
+                +-----------+-----------+
+                |                       |
+          (Local Feats)          (Global Mean)
+                |                 [ Linear 2 ]
+                |                 [  Repeat  ]
+                v                       v
+                +--------->( Concat )<--+
+                               |
+                          [ Linear 1 ]
+                               |
+                             Output
+    """
     def __init__(self, in_planes, out_planes=None):
         super().__init__()
         if out_planes is None:
@@ -144,24 +268,47 @@ class TransitionUp(nn.Module):
             )
 
     def forward(self, pxo1, pxo2=None):
+        # === 模式 2：全局特征聚合 (当没有提供第二个输入 pxo2 时) ===
+        # 这通常发生在 Encoder 刚结束，准备进入 Decoder 的最深层 (Stage 5)
         if pxo2 is None:
             _, x, o = pxo1  # (n, 3), (n, c), (b)
             x_tmp = []
+            # 遍历 Batch 中的每一个样本（点云）
             for i in range(o.shape[0]):
+                # 计算当前样本在 packed Tensor 中的起始索引 s_i 和结束索引 e_i，以及点数 cnt
                 if i == 0:
                     s_i, e_i, cnt = 0, o[0], o[0]
                 else:
                     s_i, e_i, cnt = o[i - 1], o[i], o[i] - o[i - 1]
+                # 取出当前样本的所有点特征
                 x_b = x[s_i:e_i, :]
+                # [核心操作]：
+                # 1. x_b.sum(0, True) / cnt: 计算当前样本所有点的平均值（Global Mean Pooling）
+                # 2. self.linear2(...): 对全局特征进行变换
+                # 3. .repeat(cnt, 1): 将全局特征复制 cnt 次，使其与点数对齐
+                # 4. torch.cat((x_b, ...), 1): 将 原始局部特征 与 全局特征 拼接
                 x_b = torch.cat(
                     (x_b, self.linear2(x_b.sum(0, True) / cnt).repeat(cnt, 1)), 1
                 )
                 x_tmp.append(x_b)
+            # 将处理完的 batch 重新拼回一个大 Tensor
             x = torch.cat(x_tmp, 0)
+            # 通过 linear1 融合拼接后的特征
             x = self.linear1(x)
         else:
+            # === 模式 1：上采样与融合 (标准用法) ===
+            # pxo1: Target (Fine)，来自 Encoder 的高分辨率特征（跳跃连接）
             p1, x1, o1 = pxo1
+            # pxo2: Source (Coarse)，来自上一层 Decoder 的低分辨率特征
             p2, x2, o2 = pxo2
+            
+            # [核心操作]：上采样 (Interpolation) + 融合 (Summation)
+            # 1. self.linear2(x2): 先变换低分辨率特征
+            # 2. pointops.interpolation(...): 
+            #    在 p2 (粗) 中寻找 p1 (细) 的最近邻，利用距离权重将 x2 插值映射到 p1 的位置。
+            #    这一步将特征数量从 N_coarse 恢复到了 N_fine。
+            # 3. self.linear1(x1): 变换高分辨率的跳跃连接特征
+            # 4. + : 将 插值后的深层特征 与 浅层细节特征 相加融合
             x = self.linear1(x1) + pointops.interpolation(
                 p2, p1, self.linear2(x2), o2, o1
             )
@@ -169,11 +316,40 @@ class TransitionUp(nn.Module):
 
 
 class Bottleneck(nn.Module):
+    """
+    瓶颈块 Bottleneck，包含 3 个线性层和 1 个点变换层
+
+    point transformer v1 中的瓶颈块 Bottleneck，包含 3 个线性层和 1 个点变换层（PointTransformerLayer），特征维度不发生变化
+
+    Input: (p, x, o)
+            |
+            +---< Identity (x) >----------------------+
+            |                                         |
+            |                                         |
+        [Linear1] -> [BN1] -> [ReLU]                   |
+            |                                         |
+            v                                         |
+        [Transformer] (inputs: p, x_feat, o)           |
+            |                                         |
+            v                                         |
+        [BN2] -> [ReLU]                                |
+            |                                         |
+            v                                         |
+        [Linear3] -> [BN3]                             |
+            |                                         |
+            v                                         |
+            (+) <--------------------------------------+
+            |
+            [ReLU]
+            |
+        Output: (p, x, o)
+
+    """
     expansion = 1
 
     def __init__(self, in_planes, planes, share_planes=8, nsample=16):
         super(Bottleneck, self).__init__()
-        self.linear1 = nn.Linear(in_planes, planes, bias=False)
+        self.linear1 = nn.Linear(in_planes, planes, bias=False) 
         self.bn1 = nn.BatchNorm1d(planes)
         self.transformer = PointTransformerLayer(planes, planes, share_planes, nsample)
         self.bn2 = nn.BatchNorm1d(planes)
@@ -183,12 +359,12 @@ class Bottleneck(nn.Module):
 
     def forward(self, pxo):
         p, x, o = pxo  # (n, 3), (n, c), (b)
-        identity = x
-        x = self.relu(self.bn1(self.linear1(x)))
-        x = self.relu(self.bn2(self.transformer([p, x, o])))
-        x = self.bn3(self.linear3(x))
+        identity = x    # 复制x用于残差连接
+        x = self.relu(self.bn1(self.linear1(x)))    # (n, c)
+        x = self.relu(self.bn2(self.transformer([p, x, o])))    # (n, c)
+        x = self.bn3(self.linear3(x))    # (n, c)
         x += identity
-        x = self.relu(x)
+        x = self.relu(x)    # (n, c)
         return [p, x, o]
 
 
