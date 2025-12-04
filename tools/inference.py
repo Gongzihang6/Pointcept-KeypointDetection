@@ -347,25 +347,25 @@ def main():
 ## 基于 Pointcept-PTv3 模型的推理脚本
 python tools/inference.py \
     --config-file configs/my_dataset/keypoint_ptv3.py \
-    --weights exp/default/model/model_best.pth \
+    --weights exp/keypoint_ptv3/model/model_best.pth \
     --subset test \
     --idx -1 \
     --visualize \
     --sphere-radius 0.02 \
     --cube-size 0.02
 ====== Batch Inference Statistics ======
-Total Samples: 189
+Total Samples: 28
 -----------------------------------------------------------------
 Keypoint ID     | Mean Error           | Std Dev             
 -----------------------------------------------------------------
-KP 0            | 27.85135            | 20.03409
-KP 1            | 25.37834            | 13.91481
-KP 2            | 24.22221            | 14.08666
-KP 3            | 22.77517            | 12.97524
-KP 4            | 28.28257            | 19.71254
-KP 5            | 34.74160            | 20.48374
+KP 0            | 22.65371            | 13.36939
+KP 1            | 21.20184            | 13.95168
+KP 2            | 30.23071            | 20.58898
+KP 3            | 27.92994            | 20.37176
+KP 4            | 32.97409            | 18.85650
+KP 5            | 34.39021            | 21.52718
 -----------------------------------------------------------------
-OVERALL         | 27.20854
+OVERALL         | 28.23009
 -----------------------------------------------------------------
 
 
@@ -419,6 +419,54 @@ KP 5            | 32.36544            | 11.43148
 OVERALL         | 27.08312
 -----------------------------------------------------------------
 
+## 基于 Pointcept-PTv2 模型的推理脚本
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_ptv2.py \
+    --weights exp/keypoint_ptv2/model/model_best.pth \
+    --subset train \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 28
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 27.17042            | 15.76558
+KP 1            | 21.63920            | 18.46684
+KP 2            | 30.25765            | 20.59952
+KP 3            | 25.22526            | 18.56907
+KP 4            | 25.64672            | 13.56527
+KP 5            | 31.95988            | 13.46944
+-----------------------------------------------------------------
+OVERALL         | 26.98319
+-----------------------------------------------------------------
+
+
+## 基于 Swin3D 模型的推理脚本
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_swin3d.py \
+    --weights exp/keypoint_swin3d/model/model_best.pth \
+    --subset train \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 28
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 19.49621            | 11.82266
+KP 1            | 21.12213            | 17.46186
+KP 2            | 31.11461            | 21.69423
+KP 3            | 25.54762            | 19.42591
+KP 4            | 23.38527            | 13.12805
+KP 5            | 25.49153            | 12.77503
+-----------------------------------------------------------------
+OVERALL         | 24.35956
+-----------------------------------------------------------------
 """
 if __name__ == "__main__":
     main()

@@ -14,8 +14,12 @@ from .oacnns import *
 from .keypoint_ptv3 import KeypointPTv3     # 基于PointTransformerV3的关键点检测模型
 from .keypoint_octformer import KeypointOctFormer     # 基于OctFormer的关键点检测模型
 from .keypoint_ptv1 import KeypointPTv1     # 基于PointTransformerV1的关键点检测模型
+from .keypoint_ptv2 import KeypointPTv2     # 基于PointTransformerV2的关键点检测模型
+from .keypoint_swin3d import KeypointSwin3D     # 基于Swin3D的关键点检测模型
 
-# from .swin3d import *
+
+
+from .swin3d import *
 
 # Semantic Segmentation
 from .context_aware_classifier import *

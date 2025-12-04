@@ -45,6 +45,16 @@ python tools/train.py --config-file configs/my_dataset/keypoint_octformer.py
 ## 基于PointTransformerV1的关键点预测模型
 export PYTHONPATH=.
 python tools/train.py --config-file configs/my_dataset/keypoint_ptv1.py
+
+## 基于PointTransformerV2的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_ptv2.py
+
+## 基于Swin3D的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_swin3d.py
+恢复训练代码
+export PYTHONPATH=.
+source .venv/bin/activate
+python tools/train.py --config-file configs/my_dataset/keypoint_swin3d.py --options resume=True weight=exp/keypoint_swin3d/model/model_last.pth
 """
 if __name__ == "__main__":
     main()

@@ -149,6 +149,13 @@ class Swin3DUNet(nn.Module):
             coordinate_map_key=sp.coordinate_map_key,
             coordinate_manager=sp.coordinate_manager,
         )
+        # # =============== [新增调试代码] ===============
+        # print("\n" + "="*30)
+        # print(f"DEBUG: coord_feat dim = {coord_feat.shape[-1]}")
+        # print(f"DEBUG: feat (input to model) shape = {sp.F.shape}")
+        # print(f"DEBUG: Model expects in_channels = {self.stem_layer.conv.in_channels}")
+        # print("="*30 + "\n")
+        # # ============================================
         sp_stack = []
         coords_sp_stack = []
         sp = self.stem_layer(sp)

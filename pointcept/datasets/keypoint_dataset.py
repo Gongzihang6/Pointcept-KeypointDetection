@@ -78,6 +78,11 @@ class KeypointDataset(Dataset):
         feat = raw_data[:, 3:]
         target = np.load(info["label_path"]).astype(np.float32)
 
+        # 提取给 Swin3D 做位置编码辅助的特征 (coord_feat)
+        # Swin3D 需要这个键。既然没有 RGB，就用 "法向量" (第3,4,5列) 代替
+        # 维度: (N, 3)
+        coord_feat = raw_data[:, 3:6]
+
         # ================= [新增] 数据安全检查 =================
         # 检查是否有 NaN 或 Inf
         if np.isnan(coord).any() or np.isinf(coord).any():
@@ -117,6 +122,7 @@ class KeypointDataset(Dataset):
             coord=coord,
             feat=feat,
             target=target, 
+            coord_feat=coord_feat,  # [新增] Swin3D 位置编码辅助特征
             name=info["name"],
             centroid=centroid, 
             scale=scale  # [重点] 这里传入 numpy 数组，方便 DataLoader 自动堆叠
