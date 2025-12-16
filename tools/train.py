@@ -4,7 +4,8 @@ Main Training Script
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
-
+import warnings
+warnings.filterwarnings("ignore")
 from pointcept.engines.defaults import (
     default_argument_parser,
     default_config_parser,
@@ -55,6 +56,12 @@ python tools/train.py --config-file configs/my_dataset/keypoint_swin3d.py
 export PYTHONPATH=.
 source .venv/bin/activate
 python tools/train.py --config-file configs/my_dataset/keypoint_swin3d.py --options resume=True weight=exp/keypoint_swin3d/model/model_last.pth
+
+## 基于OA-CNNs的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_oa_cnns.py
+
+## 基于StratifiedTransformer的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_stratified_transformer.py
 """
 if __name__ == "__main__":
     main()

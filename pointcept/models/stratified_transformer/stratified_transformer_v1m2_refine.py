@@ -54,7 +54,9 @@ def offset2batch(offset):
 
 
 def grid_sample(coords, batch, size, start, return_p2v=True):
-    cluster = voxel_grid(coords, batch, size, start=start)
+    # cluster = voxel_grid(coords, batch, size, start=start)
+    # [Fix] 使用关键字参数调用，兼容 PyG 2.x 和旧版本
+    cluster = voxel_grid(pos=coords, batch=batch, size=size, start=start)
 
     if not return_p2v:
         unique, cluster = torch.unique(cluster, sorted=True, return_inverse=True)
@@ -197,7 +199,9 @@ class WindowAttention(nn.Module):
         else:
             relative_position_bias = 0.0
 
-        attn_flat += relative_position_bias
+        # attn_flat += relative_position_bias
+        # [Fix] 改为非原位加法
+        attn_flat = attn_flat + relative_position_bias
         softmax_attn_flat = scatter_softmax(src=attn_flat, index=index_0, dim=0)
 
         if self.rel_value:
@@ -281,7 +285,8 @@ class Block(nn.Module):
         feats = self.attn(feats, coords, index_0, index_1, index_0_offsets, n_max)
 
         feats = short_cut + self.drop_path(feats)
-        feats += self.drop_path(self.mlp(self.norm2(feats)))
+        # feats += self.drop_path(self.mlp(self.norm2(feats)))
+        feats = feats + self.drop_path(self.mlp(self.norm2(feats)))
         return feats
 
 
@@ -585,7 +590,8 @@ class KPConvResBlock(nn.Module):
         feats = self.kpconv(xyz, xyz, neighbor_idx, feats)
         feats = self.unary_2(feats)
         shortcut = self.shortcut_op(shortcut)
-        feats += shortcut
+        # feats += shortcut
+        feats = feats + shortcut
         return feats
 
 

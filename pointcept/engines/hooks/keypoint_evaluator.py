@@ -37,6 +37,11 @@ class KeypointEvaluator(HookBase):
                 pred = output_dict["pred"]   # (B, 6, 3)
                 target = data_dict["target"] # (B, 6, 3)
                 
+                # [Fix] 如果 target 被 DataLoader 展平了，将其 reshape 回 (B, 6, 3)
+                if target.shape != pred.shape:
+                    target = target.view(pred.shape)
+
+                    
                 # 3. 计算距离 (L2 Norm)
                 # shape: (B, 6) -> mean -> (B,)
                 dist_val = torch.norm(pred - target, p=2, dim=-1).mean(dim=1)

@@ -15,6 +15,9 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+import warnings
+warnings.filterwarnings("ignore")
+
 # 添加项目根目录到 python path，确保能导入 pointcept
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
@@ -375,7 +378,7 @@ python tools/inference.py \
     --config-file configs/my_dataset/keypoint_octformer.py \
     --weights exp/keypoint_octformer/model/model_best.pth \
     --subset test \
-    --idx -1 \
+    --idx 1 \
     --visualize \
     --sphere-radius 0.02 \
     --cube-size 0.02
@@ -400,7 +403,7 @@ python tools/inference.py \
     --config-file configs/my_dataset/keypoint_ptv1.py \
     --weights exp/keypoint_ptv1/model/model_best.pth \
     --subset test \
-    --idx -1 \
+    --idx 10 \
     --visualize \
     --sphere-radius 0.02 \
     --cube-size 0.02
@@ -448,8 +451,8 @@ OVERALL         | 26.98319
 python tools/inference.py \
     --config-file configs/my_dataset/keypoint_swin3d.py \
     --weights exp/keypoint_swin3d/model/model_best.pth \
-    --subset train \
-    --idx -1 \
+    --subset test \
+    --idx 10 \
     --visualize \
     --sphere-radius 0.02 \
     --cube-size 0.02
@@ -467,6 +470,43 @@ KP 5            | 25.49153            | 12.77503
 -----------------------------------------------------------------
 OVERALL         | 24.35956
 -----------------------------------------------------------------
+
+## 基于 StratifiedTransformer 模型的推理脚本
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_stratified_transformer.py \
+    --weights exp/keypoint_stratified_transformer/model/model_best.pth \
+    --subset test \
+    --idx 10 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 28
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 22.32730            | 11.79639
+KP 1            | 21.55352            | 17.45925
+KP 2            | 30.36640            | 19.86914
+KP 3            | 25.84641            | 18.55916
+KP 4            | 23.82463            | 13.31656
+KP 5            | 25.93475            | 10.36481
+-----------------------------------------------------------------
+OVERALL         | 24.97550
+-----------------------------------------------------------------
+
+## 基于OA-CNNS的推理脚本
+export PYTHONPATH=.
+source .venv/bin/activate
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_oa_cnns.py \
+    --weights exp/keypoint_oa_cnns/model/model_best.pth \
+    --subset test \
+    --idx 10 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+
 """
 if __name__ == "__main__":
     main()

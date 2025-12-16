@@ -1,3 +1,6 @@
+预测关键点坐标/
+.venv/
+.venv_jazzy/
 image/
 __pycache__
 **/build/

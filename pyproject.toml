@@ -3,3 +3,6 @@ name = "Pointcept-KeypointDetection" # 根据你的项目名称修改
 version = "0.1.0" # 或者其他版本号
 description = "使用Pointcept实现关键点检测任务"
 dependencies = [] # uv add 命令会自动填充这里
+
+[tool.setuptools]
+packages = ["pointcept"]
