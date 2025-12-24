@@ -1,0 +1,48 @@
+# -----------------------------------------------------------------------------
+# 文件位置: .github/workflows/ci.yml
+# 作用: GitHub Actions 自动化部署脚本
+# 功能: 
+#   1. 监听 main 分支的 push 事件
+#   2. 自动安装 mkdocs 和 material 主题
+#   3. 构建静态网页并推送到 gh-pages 分支
+# -----------------------------------------------------------------------------
+name: ci 
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure Git Credentials
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          
+      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV 
+      
+      - uses: actions/cache@v4
+        with:
+          key: mkdocs-material-${{ env.cache_id }}
+          path: .cache
+          restore-keys: |
+            mkdocs-material-
+            
+      - name: Install dependencies
+        # 这里安装 mkdocs-material 即可，它包含了 mkdocs
+        run: pip install mkdocs-material 
+        
+      - name: Deploy documentation
+        run: mkdocs gh-deploy --force

@@ -1,0 +1,92 @@
+# -----------------------------------------------------------------------------
+# 文件名: mkdocs.yml
+# 作用: MkDocs 的全局配置文件
+# 功能:
+#   1. 定义网站名称、作者、仓库链接
+#   2. 配置 Material 主题（颜色、夜间模式、导航栏）
+#   3. 启用 Markdown 扩展（公式、代码高亮、提示块）
+#   4. 定义文档导航结构
+# -----------------------------------------------------------------------------
+
+site_name: Pointcept-KeypointDetection
+site_url: https://Gongzihang6.github.io/Pointcept-KeypointDetection/
+site_author: Gongzihang6
+site_description: Documentation for Pointcept-KeypointDetection project.
+
+# 仓库信息（会在页面右上角显示 GitHub 图标）
+repo_name: Gongzihang6/Pointcept-KeypointDetection
+repo_url: https://github.com/Gongzihang6/Pointcept-KeypointDetection
+
+# 主题配置
+theme:
+    name: material
+    language: zh # 设置语言为中文
+    features:
+        - navigation.tabs # 顶部导航栏形式
+        - navigation.sections # 侧边栏分组
+        - navigation.expand # 默认展开侧边栏
+        - navigation.top # 返回顶部按钮
+        - toc.follow # 目录自动跟随滚动
+        - content.code.copy # 代码块复制按钮
+    palette:
+        # 浅色模式配置
+        - scheme: default
+          primary: teal # 主色调
+          accent: purple
+          toggle:
+              icon: material/weather-sunny
+              name: Switch to dark mode
+        # 深色模式配置
+        - scheme: slate
+          primary: teal
+          accent: lime
+          toggle:
+              icon: material/weather-night
+              name: Switch to light mode
+
+# Markdown 扩展功能
+markdown_extensions:
+    - admonition # 提示块（Note, Warning等）
+    - pymdownx.details #以此支持折叠块
+    - pymdownx.superfences # 高级代码块嵌套
+    - pymdownx.highlight: # 代码高亮
+          linenums: true
+          linenums_style: pymdownx-inline
+          anchor_linenums: true
+          line_spans: __span
+          pygments_lang_class: true
+    - pymdownx.inlinehilite
+    - pymdownx.snippets
+    - pymdownx.arithmetic: # 数学公式支持 (LaTeX)
+          ignore:
+              - "\\( "
+              - " \\)"
+
+# 额外的 JavaScript (用于渲染公式)
+extra_javascript:
+    - javascripts/mathjax.js
+    - https://polyfill.io/v3/polyfill.min.js?features=es6
+    - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+# 导航结构 (您可以根据需要增删)
+nav:
+    - 首页: index.md
+    # - 快速开始:
+    #       - 安装指南: installation.md
+    #       - 快速运行: usage.md
+    - 模型架构: 
+        - models/swin3d.md
+        - models/octfomer.md
+    - 关于: about.md
+
+plugins:
+    - awesome-pages
+    - search
+    - git-revision-date-localized:
+          type: date
+          enable_creation_date: true
+
+# 注册自定义 CSS 文件
+extra_css:
+    - stylesheets/extra.css
+

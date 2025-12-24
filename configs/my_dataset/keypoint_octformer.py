@@ -20,13 +20,13 @@ model = dict(
     hidden_dim=256,       # 回归头隐藏层
     
     # OctFormer 结构参数 (与 semseg-octformer-v1m1-0-base.py 保持一致)
-    channels=(96, 192, 384, 384),
-    num_blocks=(2, 2, 18, 2),
-    num_heads=(6, 12, 24, 24),
-    patch_size=26,
-    stem_down=2,
+    channels=(96, 192, 384, 384),   # 对应论文中4个阶段的C、2C、4C、4C
+    num_blocks=(2, 2, 18, 2),   # 对应论文中的N1、N2、N3、N4，表示每个阶段OctFOrmer Block块的数量
+    num_heads=(6, 12, 24, 24),  # 每个阶段OctFormer Block 中多头自注意力的头数量
+    patch_size=26,      # 每个窗口计算自注意力的点个数
+    stem_down=2,        # 指的是进入stage1之前，Embedding模块使八叉树的深度降低2级，反映到分辨率上就是点个数变为1/4
     head_up=2,
-    dilation=4,
+    dilation=4,         # OctFormer Block中第二个OctFormer中膨胀自注意力的膨胀系数
     drop_path=0.5,
     nempty=True,
     octree_depth=11,      # 可根据点云场景大小调整，ScanNet常用11

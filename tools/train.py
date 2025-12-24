@@ -62,6 +62,9 @@ python tools/train.py --config-file configs/my_dataset/keypoint_oa_cnns.py
 
 ## 基于StratifiedTransformer的关键点预测模型
 python tools/train.py --config-file configs/my_dataset/keypoint_stratified_transformer.py
+
+## 基于sparse_unet的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_sparse_unet.py
 """
 if __name__ == "__main__":
     main()
