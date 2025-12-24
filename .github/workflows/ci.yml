@@ -42,7 +42,7 @@ jobs:
             
       - name: Install dependencies
         # 这里安装 mkdocs-material 即可，它包含了 mkdocs
-        run: pip install mkdocs-material 
+        run: pip install -r requirements.txt
         
       - name: Deploy documentation
         run: mkdocs gh-deploy --force

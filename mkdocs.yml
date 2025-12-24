@@ -44,28 +44,39 @@ theme:
               icon: material/weather-night
               name: Switch to light mode
 
-# Markdown 扩展功能
+# 必须的扩展：数学公式与代码增强
 markdown_extensions:
-    - admonition # 提示块（Note, Warning等）
-    - pymdownx.details #以此支持折叠块
-    - pymdownx.superfences # 高级代码块嵌套
-    - pymdownx.highlight: # 代码高亮
+    - abbr
+    - attr_list
+    - admonition
+    - def_list
+    - footnotes
+    - md_in_html
+    - pymdownx.details
+    - pymdownx.superfences
+    - pymdownx.tabbed: # <--- 之前漏掉了这个关键配置！
+          alternate_style: true # 开启现代化样式
+    - pymdownx.highlight:
           linenums: true
           linenums_style: pymdownx-inline
           anchor_linenums: true
           line_spans: __span
           pygments_lang_class: true
+        #   pygments_style: "monokai"
+        #   pygments_style_dark: "dracula"   # 夜间模式下的代码配色
     - pymdownx.inlinehilite
     - pymdownx.snippets
-    - pymdownx.arithmetic: # 数学公式支持 (LaTeX)
-          ignore:
-              - "\\( "
-              - " \\)"
+    - pymdownx.arithmatex:
+          generic: true
+    - sane_lists
+    - pymdownx.smartsymbols
+    - pymdownx.superfences
+    - pymdownx.inlinehilite
 
 # 额外的 JavaScript (用于渲染公式)
 extra_javascript:
     - javascripts/mathjax.js
-    - https://polyfill.io/v3/polyfill.min.js?features=es6
+    - https://cdnjs.cloudflare.com/ajax/libs/polyfill-service/3.111.0/polyfill.min.js?features=es6
     - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 # 导航结构 (您可以根据需要增删)
@@ -80,6 +91,14 @@ nav:
     - 关于: about.md
 
 plugins:
+    - glightbox:
+        touchNavigation: true
+        loop: false
+        effect: zoom # zoom, fade, etc.
+        width: 100%
+        height: auto
+        zoomable: true
+        draggable: true
     - awesome-pages
     - search
     - git-revision-date-localized:

@@ -1,3 +1,8 @@
+---
+hide:
+  - navigation # 在首页隐藏右侧的本页目录（可选，让首页看起来更像封面）
+---
+
 # Pointcept-KeypointDetection
 
 **Pointcept-KeypointDetection** 是一个基于 Pointcept 框架的 3D 关键点检测项目。

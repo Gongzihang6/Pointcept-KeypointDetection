@@ -60,9 +60,11 @@ cRSE 的计算过程可以分为三个步骤：**信号差分**、**量化与查
 ##### 第一步：计算信号差异 ($\Delta s_{ij}$)
 
 对于窗口内的任意两个体素 $i$ 和 $j$，首先计算它们原始信号的差异。
+
 $$
 \Delta s_{ij} = s_{v_i} - s_{v_j}
 $$
+
 这里的信号 $s$ 是一个复合向量，通常包含：
 
 -   **位置**：$x, y, z$
@@ -74,17 +76,20 @@ $$
 由于 $\Delta s_{ij}$ 是连续的浮点数，无法直接作为索引去查找参数。因此需要将其 **量化** 为整数索引，然后去一个可学习的 **查找表 (Look-up Table, LUT)** 中取值。
 
 1.  量化公式 ：对于信号的第 $l$ 个分量（例如红色分量 R），计算索引 $I_l$：
+2.  
     $$
-    I_l(\Delta) = \left\lfloor \frac{(\Delta [l] - \text{min\_val}) \times L}{\text{range}} \right\rfloor
+    I_l(\Delta) = \left\lfloor \frac{(\Delta [l] - min_{val}) \times L}{\text{range}} \right\rfloor
     $$
 
-    -   $\text{min\_val}$ 和 $\text{range}$ 是预定义的范围（例如 RGB 颜色范围是 $[-1, 1]$）6。
+    -   $min_{val}$ 和 $\text{range}$ 是预定义的范围（例如 RGB 颜色范围是 $[-1, 1]$）6。
     -   $L$ 是表的大小（例如颜色和法向量设为 16，位置设为 4）7。
 
 2.  查表映射 ：通过索引 $I_l$，从可学习的表 $t^Q, t^K, t^V$ 中取出对应的向量。
+3.  
     $$
     t_{Q, h}(\Delta) = \sum_{l = 1}^{m} t_{l, h}^Q [I_l(\Delta)]
     $$
+    
     这意味着将位置差、颜色差、法向量差对应的特征向量相加，得到一个综合的信号差异编码。
 
 ##### 第三步：融入注意力计算 (Integration)
@@ -98,6 +103,7 @@ e_{ij, h} = \frac{(f_i W_{Q, h})(f_j W_{K, h})^T + b_{ij, h}}{\sqrt{d}}
 $$
 
 其中 $b_{ij,h}$ 是上下文偏差项：
+
 $$
 b_{ij, h} = \underbrace{(f_i W_{Q, h}) \cdot t_{Q, h}(\Delta s_{ij})}_{\text{Query 与信号差的交互}} + \underbrace{(f_j W_{K, h}) \cdot t_{K, h}(\Delta s_{ij})}_{\text{Key 与信号差的交互}}
 $$
@@ -106,6 +112,7 @@ $$
 -   修改 Output Value ($f^*$)
 
 cRSE 不仅影响权重的计算，还直接把信号差异信息加到了 Value ($V$) 上 10：
+
 $$
 f_{i, h}^* = \frac{\sum_{j} \exp(e_{ij, h}) (f_j W_{V, h} + t_{V, h}(\Delta s_{ij}))}{\sum_{j} \exp(e_{ij, h})}
 $$
