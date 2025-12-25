@@ -5,7 +5,8 @@ hide:
 
 # Pointcept-KeypointDetection
 
-**Pointcept-KeypointDetection** 是一个基于 Pointcept 框架的 3D 关键点检测项目。
+> [!NOTE]
+> **Pointcept-KeypointDetection** 是一个基于 Pointcept 框架的 3D 关键点检测项目。
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -17,16 +18,15 @@ hide:
 
 ## 📦 快速预览
 
-```python
-# 这是一个代码示例
-import pointcept
-print("Hello Pointcept!")
-!!! note "提示" 请参考 安装指南 开始使用。
+??? note "示例代码"
+    ```python
+    # 这是一个代码示例
+    import pointcept
+    print("Hello Pointcept!")
+    ```
 
 
-#### `docs/installation.md` (安装指南)
 
-```markdown
 # 安装指南
 
 ## 环境要求
@@ -39,4 +39,5 @@ print("Hello Pointcept!")
 
 1. 克隆仓库：
    ```bash
-   git clone [https://github.com/Gongzihang6/Pointcept-KeypointDetection.git](https://gi
+   git clone https://github.com/Gongzihang6/Pointcept-KeypointDetection.git
+   ```

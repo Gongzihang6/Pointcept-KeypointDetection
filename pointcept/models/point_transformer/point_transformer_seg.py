@@ -87,7 +87,7 @@ class PointTransformerLayer(nn.Module):
     def forward(self, pxo) -> torch.Tensor:
         p, x, o = pxo  # (n, 3), (n, c), (b)
         x_q, x_k, x_v = self.linear_q(x), self.linear_k(x), self.linear_v(x)
-        x_k, idx = pointops.knn_query_and_group(    # 进行KNN查询最近的nsample个点
+        x_k, idx = pointops.knn_query_and_group(    # 进行KNN查询最近的nsample个点，因为with_xyz设置为true，返回的x_k中的前3维是坐标差，然后C维是特征维度
             x_k, p, o, new_xyz=p, new_offset=o, nsample=self.nsample, with_xyz=True
         )
         x_v, _ = pointops.knn_query_and_group(
@@ -101,7 +101,7 @@ class PointTransformerLayer(nn.Module):
             with_xyz=False,
         )
         p_r, x_k = x_k[:, :, 0:3], x_k[:, :, 3:]
-        p_r = self.linear_p(p_r)    # 对坐标进行位置编码
+        p_r = self.linear_p(p_r)    # 使用p和p的邻居的坐标差进行位置编码
         r_qk = (
             x_k     # n k c
             - x_q.unsqueeze(1)  # n 1 c 在中间邻居点数量维度上增加一维，自动进行广播，计算中心点与每个邻居点之间的特征差异
@@ -137,7 +137,7 @@ class TransitionDown(nn.Module):
     [ Farthest Point Sample ]        [ Grouping ]
         |                    >------->  |
         v (indices)          |           v (Local Region)
-        (idx)                |  Feature: (M, K, C+3)
+        (idx)                |  Feature: (M, K, C+3)  最远点采样获取M个特征点，每个特征点knn查询获取K个邻居点
         |                    |           | (C features + 3 rel pos)
         v                    |           v
     [ New Coordinates ]      |        [ Linear ]
@@ -153,7 +153,7 @@ class TransitionDown(nn.Module):
         |                                |
         +---------------+----------------+
                         |
-                Output: [n_p, x_new, n_o]
+                Output: [n_p, x_new, n_o]   返回下采样后的点云坐标n_p，特征x_new，下采样后的点云数量n_o
 
     """
     def __init__(self, in_planes, out_planes, stride=1, nsample=16):
@@ -290,28 +290,30 @@ class TransitionUp(nn.Module):
                 x_b = torch.cat(
                     (x_b, self.linear2(x_b.sum(0, True) / cnt).repeat(cnt, 1)), 1
                 )
-                x_tmp.append(x_b)
+                x_tmp.append(x_b)   # (cnt,c)->(c)->(c_new)->(cnt,c_new)
             # 将处理完的 batch 重新拼回一个大 Tensor
             x = torch.cat(x_tmp, 0)
             # 通过 linear1 融合拼接后的特征
             x = self.linear1(x)
         else:
             # === 模式 1：上采样与融合 (标准用法) ===
-            # pxo1: Target (Fine)，来自 Encoder 的高分辨率特征（跳跃连接）
+            # pxo1: Target (Fine)，来自 Encoder 的高分辨率特征（跳跃连接），p1是密集点云，x1是低维特征
             p1, x1, o1 = pxo1
-            # pxo2: Source (Coarse)，来自上一层 Decoder 的低分辨率特征
+            # pxo2: Source (Coarse)，来自上一层 Decoder 的低分辨率特征，p2是稀疏点云，x2是高维特征
             p2, x2, o2 = pxo2
             
             # [核心操作]：上采样 (Interpolation) + 融合 (Summation)
-            # 1. self.linear2(x2): 先变换低分辨率特征
+            # 1. self.linear2(x2): 先变换成低维特征
             # 2. pointops.interpolation(...): 
-            #    在 p2 (粗) 中寻找 p1 (细) 的最近邻，利用距离权重将 x2 插值映射到 p1 的位置。
-            #    这一步将特征数量从 N_coarse 恢复到了 N_fine。
-            # 3. self.linear1(x1): 变换高分辨率的跳跃连接特征
+            #    在 p1 (密集点云) 中寻找 p2 (稀疏点云) 的最近邻，利用距离权重将 x2 插值映射到 p1 的位置。
+            #    这一步将深层的特征传播到了密集的点云坐标上
+            # 3. self.linear1(x1): 低维特征也变化一下，提取特征
             # 4. + : 将 插值后的深层特征 与 浅层细节特征 相加融合
             x = self.linear1(x1) + pointops.interpolation(
                 p2, p1, self.linear2(x2), o2, o1
-            )
+            )   # 和PointNet++的找邻居一样，对密集点云中的每一个点，在稀疏点云中寻找最近的k个点，权重依然是根据距离反比获得，然后对稀疏点云（高维特征）进行加权求和
+            # 不同之处在于，PointNet++将插值得到的高维特征和原来密集点云的低维特征直接在通道维度拼接，但是ptv1是先将高维特征降维（和密集点云中的低维特征维度一致），
+            # 然后在密集点云中寻找稀疏点云的邻居，利用距离权重将高降维后的特征插值映射到密集点云的位置，最后将密集点云的新特征和旧特征直接逐元素相加
         return x
 
 

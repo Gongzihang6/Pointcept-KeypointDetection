@@ -88,9 +88,11 @@ nav:
     - 模型架构: 
         - models/swin3d.md
         - models/octfomer.md
+        - models/PointTransformer.md
     - 关于: about.md
 
 plugins:
+    - callouts
     - glightbox:
         touchNavigation: true
         loop: false

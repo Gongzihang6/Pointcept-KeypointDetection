@@ -135,3 +135,8 @@ footer.md-footer { background-color: #ffffff !important; color: #333333 !importa
 .md-typeset .c, .md-typeset .c1, .md-typeset .cs, .md-typeset .cm { color: #6a737d; font-style: italic; }
 .md-typeset .m, .md-typeset .mi { color: #005cc5; }
 .md-typeset .cp { color: #005cc5; font-weight: bold; }
+
+/* 修改文档宽度占比 */
+.md-main__inner.md-grid {
+    max-width: 85% !important;
+}
