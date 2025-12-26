@@ -30,16 +30,23 @@ class PointBatchNorm(nn.Module):
 
     def __init__(self, embed_channels):
         super().__init__()
+        # 初始化一个标准的 PyTorch 1D 批归一化层
         self.norm = nn.BatchNorm1d(embed_channels)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # 情况 1: 输入是 3D 张量 [B*N, L, C]
+        # 这种形状通常出现在 "Grouped Vector Attention" 中处理邻域特征时
+        # 其中 L 是邻居点数，C 是特征维度
         if input.dim() == 3:
             return (
-                self.norm(input.transpose(1, 2).contiguous())
-                .transpose(1, 2)
-                .contiguous()
+                self.norm(input.transpose(1, 2).contiguous()) # 1. 转置: [N, L, C] -> [N, C, L] 以适配 BN
+                .transpose(1, 2)                              # 2. 转回: [N, C, L] -> [N, L, C] 恢复原状
+                .contiguous()                                 # 3. 确保存储连续
             )
+        # 情况 2: 输入是 2D 张量 [B*N, C]
+        # 这种形状是最常见的点云特征表示（所有点铺平）
         elif input.dim() == 2:
+            # 对于 2D 输入，[N, C] 格式也是 PyTorch BN 支持的，直接通过
             return self.norm(input)
         else:
             raise NotImplementedError
@@ -101,30 +108,30 @@ class GroupedVectorAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop_rate)
 
     def forward(self, feat, coord, reference_index):
-        query, key, value = (
+        query, key, value = (       # 根据输入特征使用线性变换计算query, key, value
             self.linear_q(feat),
             self.linear_k(feat),
             self.linear_v(feat),
         )
-        key = pointops.grouping(reference_index, key, coord, with_xyz=True)
-        value = pointops.grouping(reference_index, value, coord, with_xyz=False)
-        pos, key = key[:, :, 0:3], key[:, :, 3:]
-        relation_qk = key - query.unsqueeze(1)
-        if self.pe_multiplier:
-            pem = self.linear_p_multiplier(pos)
-            relation_qk = relation_qk * pem
-        if self.pe_bias:
+        key = pointops.grouping(reference_index, key, coord, with_xyz=True)         # 根据邻域索引获取注意力范围内所有点的K，K的前三维是坐标差
+        value = pointops.grouping(reference_index, value, coord, with_xyz=False)    # 根据邻域索引获取注意力范围内所有点的V
+        pos, key = key[:, :, 0:3], key[:, :, 3:]    # 从K中分离出坐标差和真正的K
+        relation_qk = key - query.unsqueeze(1)      # 计算r(Q,K)，这里是差运算
+        if self.pe_multiplier:      # 位置编码乘子法
+            pem = self.linear_p_multiplier(pos)     # 对坐标差进行线性变换
+            relation_qk = relation_qk * pem         # r(Q,K) * pem
+        if self.pe_bias:            # 位置编码偏置法
             peb = self.linear_p_bias(pos)
             relation_qk = relation_qk + peb
             value = value + peb
 
-        weight = self.weight_encoding(relation_qk)
-        weight = self.attn_drop(self.softmax(weight))
+        weight = self.weight_encoding(relation_qk)      # 使用MLP计算权重
+        weight = self.attn_drop(self.softmax(weight))   # 权重softmax归一化
 
-        mask = torch.sign(reference_index + 1)
-        weight = torch.einsum("n s g, n s -> n s g", weight, mask)
+        mask = torch.sign(reference_index + 1)      # 创建一个掩码矩阵，用于去除无效的索引（避免极端情况下找到的邻域点不足k个）
+        weight = torch.einsum("n s g, n s -> n s g", weight, mask)  # 对于无效点，reference_index为-1，mask为0，weight中这些位置的权重被设为0
         value = einops.rearrange(value, "n ns (g i) -> n ns g i", g=self.groups)
-        feat = torch.einsum("n s g i, n s g -> n g i", value, weight)
+        feat = torch.einsum("n s g i, n s g -> n g i", value, weight)   # n ns g i * n ns g -> n g i
         feat = einops.rearrange(feat, "n g i -> n (g i)")
         return feat
 

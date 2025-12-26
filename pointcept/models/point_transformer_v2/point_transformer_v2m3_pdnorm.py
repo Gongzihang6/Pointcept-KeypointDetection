@@ -154,19 +154,19 @@ class GroupedVectorAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop_rate)
 
     def forward(self, feat, coord, reference_index):
-        query, key, value = (
+        query, key, value = (       # 根据输入特征计算注意力计算需要的Q、K、V
             self.linear_q(feat),
             self.linear_k(feat),
             self.linear_v(feat),
         )
-        key = pointops.grouping(reference_index, key, coord, with_xyz=True)
-        value = pointops.grouping(reference_index, value, coord, with_xyz=False)
-        pos, key = key[:, :, 0:3], key[:, :, 3:]
-        relation_qk = key - query.unsqueeze(1)
-        if self.pe_multiplier:
-            pem = self.linear_p_multiplier(pos)
-            relation_qk = relation_qk * pem
-        if self.pe_bias:
+        key = pointops.grouping(reference_index, key, coord, with_xyz=True)         # 根据邻域索引获取注意力范围内所有点的K，K的前三维是坐标差
+        value = pointops.grouping(reference_index, value, coord, with_xyz=False)    # 根据邻域索引获取注意力范围内所有点的V
+        pos, key = key[:, :, 0:3], key[:, :, 3:]    # 从K中分离出坐标差和真正的K
+        relation_qk = key - query.unsqueeze(1)      # 计算r(Q,K)，这里是差运算
+        if self.pe_multiplier:  # 位置编码乘子法
+            pem = self.linear_p_multiplier(pos) # 对坐标差进行线性变换
+            relation_qk = relation_qk * pem     # r(Q,K) * pem
+        if self.pe_bias:        # 位置编码偏置法
             peb = self.linear_p_bias(pos)
             relation_qk = relation_qk + peb
             value = value + peb
@@ -296,35 +296,91 @@ class GridPool(nn.Module):
         self.out_channels = out_channels
         self.grid_size = grid_size
 
+        # 定义池化前的特征变换层：Linear -> Norm -> ReLU
+        # 这对应论文公式(8)中的 U 变换：f_j * U
         self.fc = nn.Linear(in_channels, out_channels, bias=bias)
         self.norm = norm_fn(out_channels)
         self.act = nn.ReLU(inplace=True)
 
     def forward(self, points, start=None):
+        # 1、数据解包与预处理
+        # points 是一个列表/元组，包含点云的各种属性
+        # coord: 坐标 (N, 3)
+        # feat: 特征 (N, C)
+        # offset: 偏移量 (B,)，表示每个点云在 batch 中的结束索引（例如 [1000, 2500] 表示第一个点云是 0~1000，第二个是 1000~2500）
         coord, feat, offset, condition, context = points
+
+        # 将 offset 转换为 batch 索引向量
+        # batch: (N,)，每个元素表示该点属于 batch 中的第几个样本（例如 [0,0,...,1,1,...]）
         batch = offset2batch(offset)
+        # 特征变换：先降维/升维，再归一化和激活
+        # 注意：这里的 self.norm 接收 condition 和 context，说明可能使用了条件归一化（Conditional BN）
+        # 这一步对应论文中池化公式里的 MaxPool({f_j * U ...}) 中的 * U 部分
         feat = self.act(self.norm(self.fc(feat), condition, context))
+
+        # 2、 计算网格对齐的原点 (Start Position)
+        # 为了保证网格划分对平移不敏感（或者说相对每个场景独立划分），需要先找到每个场景的最小坐标作为“原点”。
+        # 计算每个 batch 中点云的最小坐标 (Min Coordinate) 作为网格生成的基准点
         start = (
             segment_csr(
-                coord,
+                coord,  # 输入坐标
+                # 构建 CSR 指针：[0, count_0, count_0+count_1, ...]
+                # 这行代码的作用是根据 batch 索引将 coord 分组
                 torch.cat([batch.new_zeros(1), torch.cumsum(batch.bincount(), dim=0)]),
-                reduce="min",
+                reduce="min",   # 对每个 batch 内部求坐标最小值
             )
             if start is None
             else start
+            # 此时 start 的形状是 (Batch_Size, 3)，存储了每个点云场景的左下角坐标
         )
+        # 3、 网格化 
+        # 这是最关键的一步，计算每个点属于哪个网格。
+        # 调用 voxel_grid 计算体素/网格索引
+        # pos=coord - start[batch]: 将坐标归一化到相对于各自场景原点的位置（相对坐标）
+        # size=self.grid_size: 网格的物理尺寸
+        # 返回的 cluster 是一个形状为 (N,) 的 Tensor，每个元素是一个整数 ID，代表该点属于哪个网格
         cluster = voxel_grid(
             pos=coord - start[batch], size=self.grid_size, batch=batch, start=0
         )
+
+        # 4、整理索引 为了使用高效的 segment_csr 进行聚合，必须将属于同一个网格的点在内存中物理相邻（即排序）。
+        # torch.unique 找出所有被占用的有效网格
+        # unique: 有哪些网格 ID 存在 (M,)
+        # cluster: (N,) 这里重新赋值了，变成 Inverse Indices，即每个点指向 unique 数组的下标 (0 ~ M-1)
+        # counts: (M,) 每个网格里有多少个点
         unique, cluster, counts = torch.unique(
             cluster, sorted=True, return_inverse=True, return_counts=True
         )
+        # 根据 cluster ID 对点进行排序
+        # 排序后，属于同一个网格的点在 Tensor 中是连续排列的
+        # sorted_cluster_indices: 排序后的索引，用于重排 coord 和 feat
         _, sorted_cluster_indices = torch.sort(cluster)
+
+        # 构建 CSR (Compressed Sparse Row) 指针
+        # idx_ptr: (M+1,)，指示了每个网格在排序后数组中的 [start, end) 位置
+        # 例如: [0, 5, 8] 表示第一个网格对应索引 0~4，第二个对应 5~7
         idx_ptr = torch.cat([counts.new_zeros(1), torch.cumsum(counts, dim=0)])
+
+        # 坐标池化：Mean Pooling (求平均)
+        # 将同一个网格内的点坐标取平均，作为新点的坐标（重心）
+        # 对应论文公式 (8): p'_i = MeanPool(...)
         coord = segment_csr(coord[sorted_cluster_indices], idx_ptr, reduce="mean")
+
+        # 特征池化：Max Pooling (求最大值)
+        # 将同一个网格内的特征取最大值
+        # 对应论文公式 (8): f'_i = MaxPool(...)
         feat = segment_csr(feat[sorted_cluster_indices], idx_ptr, reduce="max")
+
+        # 5、更新 batch 索引
+        # 更新 batch 索引
+        # 这里的逻辑是：取每个网格段的第一个点的 batch 索引（同一个网格内的点肯定属于同一个 batch）
         batch = batch[idx_ptr[:-1]]
-        offset = batch2offset(batch)
+        offset = batch2offset(batch)    # 将 batch 索引还原回 offset 格式，供下一层使用
+
+        # 返回值：
+        # 1. 新的点云数据列表 [新坐标, 新特征, 新offset, ...]
+        # 2. cluster: 原始点到新网格的映射索引 (N,)。
+        #    这个 cluster 非常重要，后续的 Unpooling (反池化) 需要用到它来做索引映射 (Map Unpooling)。
         return [coord, feat, offset, condition, context], cluster
 
 

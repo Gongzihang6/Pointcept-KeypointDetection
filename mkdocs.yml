@@ -46,6 +46,7 @@ theme:
 
 # 必须的扩展：数学公式与代码增强
 markdown_extensions:
+    - pymdownx.mark     # 支持markdown的==高亮
     - abbr
     - attr_list
     - admonition
@@ -92,7 +93,8 @@ nav:
     - 关于: about.md
 
 plugins:
-    - callouts
+    - caption       # 显示图片题注
+    - callouts      # 显示>[!NOTE] 语法
     - glightbox:
         touchNavigation: true
         loop: false

@@ -14,7 +14,7 @@ Swin3D 的整体架构分为 5 个阶段（Stages），形成了一个层级式�
 
 ![Swin3D 整体网络架构图](https://cdn.jsdelivr.net/gh/Gongzihang6/Pictures@main/Medias/2025%5C12%5Cimage-20251206140819429.png)
 
-### Voxelization
+## Voxelization
 
 体素化模块，论文中使用稀疏体素来表示点，如图 1 所示，根据输入点云，创建了 5 个不同层级的稀疏化体素网格，默认情况下，对于室内场景，划分最细的网格是 2cm，然后每提高一级，网格尺寸增加一倍；
 
@@ -24,7 +24,7 @@ Swin3D 的整体架构分为 5 个阶段（Stages），形成了一个层级式�
 - 后续层级（l+1）中，后续层级体素都比最精细的体素网格要大，一个体素相当于之前四个体素，这时从子体素的代表点中选择最接近几何中心的点；
 - 这一步将无序的点云转化为结构化的稀疏体素，同时保留了点的原始信号 $s_v$ 。
 
-### Initial Feature Embedding
+## Initial Feature Embedding
 
 论文中提到，参考 [Stratified transformer for 3D point cloud segmentation](https://arxiv.org/abs/2203.14508).发现的，直接使用线性层或 MLP 将原始特征投影到高维空间对于 Swin 系列的 transformer 架构无法产生比较好的效果，因此论文中提出使用一个 `3*3*3` 的卷积核对输入数据进行稀疏卷积（通过哈希表存储非空体素索引，避免大量空体素的无效计算），以及 BN 批量归一化和 ReLU 激活层，将输入体素特征变换到 $\mathbb{R}^{C_1}$
 
@@ -36,11 +36,11 @@ Swin3D 的整体架构分为 5 个阶段（Stages），形成了一个层级式�
 - **操作**：使用一层 $3 \times 3 \times 3$ 的 **稀疏卷积 (Sparse Convolution)**，通过 Batch Normalization (BN) 和 ReLU 激活函数。
 - **目的**：将低维的原始信号投影到高维特征空间 $\mathbb{R}^{C_1}$。
 
-### Contextual relative signal encoding（cRSE）
+## Contextual relative signal encoding（cRSE）
 
 上下文相对信号编码，本质是对 Swin Transformer 中的相对位置编码的一种广义化增强
 
-#### 1、为什么要有 cRSE？
+### 1、为什么要有 cRSE？
 
 在标准的 2D Swin Transformer 中，像素是排列在规则网格上的，相对位置是固定的。但在 3D 点云中，Swin3D 面临两个特殊挑战：
 
@@ -51,11 +51,11 @@ Swin3D 的整体架构分为 5 个阶段（Stages），形成了一个层级式�
 
 这种编码被称为“Contextual（上下文的）”，是因为它不仅仅加一个静态的偏置值，而是让这个偏置值与当前的 Query 和 Key 进行交互，使得注意力机制能动态地根据信号差异来调整关注度 。
 
-#### 2. 计算过程：cRSE 是如何运作的？
+### 2. 计算过程：cRSE 是如何运作的？
 
 cRSE 的计算过程可以分为三个步骤：**信号差分**、**量化与查表**、**融入注意力机制**。
 
-##### 第一步：计算信号差异 ($\Delta s_{ij}$)
+#### 第一步：计算信号差异 ($\Delta s_{ij}$)
 
 对于窗口内的任意两个体素 $i$ 和 $j$，首先计算它们原始信号的差异。
 
@@ -69,7 +69,7 @@ $$
 - **颜色**：$r, g, b$
 - 法向量：$n_x, n_y, n_z$，这意味着 cRSE 不仅编码位置差，也编码颜色差和法向量差。
 
-##### 第二步：量化与查表 (Quantization & Look-up Table)
+#### 第二步：量化与查表 (Quantization & Look-up Table)
 
 由于 $\Delta s_{ij}$ 是连续的浮点数，无法直接作为索引去查找参数。因此需要将其 **量化** 为整数索引，然后去一个可学习的 **查找表 (Look-up Table, LUT)** 中取值。
 
@@ -92,7 +92,7 @@ $$
 
     这意味着将位置差、颜色差、法向量差对应的特征向量相加，得到一个综合的信号差异编码。
 
-##### 第三步：融入注意力计算 (Integration)
+#### 第三步：融入注意力计算 (Integration)
 
 这是最关键的一步。cRSE 不仅仅是给 Attention Score 加一个标量 $b$，它是将信号差异编码投影后，分别与 Query 和 Key 进行交互。
 
@@ -120,13 +120,13 @@ $$
 
 - 这里 $t_{V,h}(\Delta s_{ij})$ 被直接加到了 $V$ 特征上。这意味着如果两个点的颜色差异很大，这个差异本身也会被作为特征传递到下一层。
 
-### 总结
+## 总结
 
 **cRSE 的本质** 是将 **[位置差, 颜色差, 法向量差]** 这一物理世界的先验知识，通过 **量化查表** 的方式变成可学习的向量，并强行注入到 Transformer 的 **Query-Key 匹配过程** 以及 **Value 聚合过程** 中。
 
 这使得 Swin3D 能够理解：“虽然这个点在空间上很近，但颜色完全不同（可能是边界），所以我应该减少对它的注意力（降低 $e_{ij}$）”。
 
-### W-MSA3D and SW-MSA3D
+## W-MSA3D and SW-MSA3D
 
 Swin3D 中的 Transformer Block，S-MSA3D 用于规则窗口，SW-MSA3D 用于偏移窗口，
 
@@ -141,7 +141,7 @@ SW-MSA3D (移位窗口)
 - **移动偏移量**：偏移量通常是窗口大小的一半，即 $(\lfloor \frac{M}{2} \rfloor, \lfloor \frac{M}{2} \rfloor, \lfloor \frac{M}{2} \rfloor)$ 6。
 - **目的**：**打破“孤岛”**。通过移动窗口，原来的边界变成了新窗口的中心。这样，原本在 S-MSA3D 中属于两个不同窗口的相邻体素，在 SW-MSA3D 中就会被包含在同一个窗口内进行交互。
 
-### Downsample
+## Downsample
 
 $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是在原始点云中采用 $l$ 层双倍的网格大小划分的体素，$l$ 层体素中每个体素的特诊表示经过 `LayerNorm+Linear Layer`，将特征维度从 $C_l$ 提升到 $C_{l+1}$，这是在 l 层的体素数量是操作的；然后是 KNNPooling，这是针对稀疏数据的特殊池化。对于下一层（$l+1$ 层）的每个体素，在上一层（$l$ 层）中找到其 **K 个最近邻 (K-Nearest Neighbors)** 体素，然后执行 **最大池化 (Max Pooling)** 21。默认 $k=16$。
 
@@ -154,7 +154,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
 在`pointcept/datasets`下新建一个`keypoint_dataset.py`，在里面创建一个pytorch风格的数据加载器，具体代码如下：
 
 ??? note
-    ```python
+    ```Python
     import os
     import glob
     from typing import Any
@@ -186,16 +186,16 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             # 扫描文件
             self.data_list = self._get_file_list()
             print(f"[{self.split}] Loaded {len(self.data_list)} samples from {self.data_root}")
-
+    
         def _get_file_list(self):
             split_path = os.path.join(self.data_root, self.split)
             if not os.path.exists(split_path):
                 raise ValueError(f"Data path does not exist: {split_path}")
-
+    
             # 匹配特征文件: *d_pc_clipped.npy
             feature_files = glob.glob(os.path.join(split_path, "*_d_pc_clipped.npy"))
             data_list = []
-
+    
             for feat_path in feature_files:
                 filename = os.path.basename(feat_path)
                 # 解析文件名: dev_2_005J_20251102_110034_430_d_pc_clipped.npy
@@ -212,7 +212,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                 
                 label_filename = f"关键点坐标_{timestamp}.npy"
                 label_path = os.path.join(split_path, label_filename)
-
+    
                 if os.path.exists(label_path):
                     data_list.append({
                         "feat_path": feat_path,
@@ -221,10 +221,10 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                     })
             
             return data_list
-
+    
         def __len__(self):
             return len(self.data_list) * self.loop
-
+    
         def __getitem__(self, idx):
             idx = idx % len(self.data_list)
             info = self.data_list[idx]
@@ -234,12 +234,12 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             coord = raw_data[:, 0:3]
             feat = raw_data[:, 3:]
             target = np.load(info["label_path"]).astype(np.float32)
-
+    
             # 提取给 Swin3D 做位置编码辅助的特征 (coord_feat)
             # Swin3D 需要这个键。既然没有 RGB，就用 "法向量" (第3,4,5列) 代替
             # 维度: (N, 3)
             coord_feat = raw_data[:, 3:6]
-
+    
             # ================= [新增] 数据安全检查 =================
             # 检查是否有 NaN 或 Inf
             if np.isnan(coord).any() or np.isinf(coord).any():
@@ -255,7 +255,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             centroid = np.mean(coord, axis=0)
             coord -= centroid
             target -= centroid
-
+    
             # 3. 归一化
             # 增加 eps 防止除以 0 的隐患
             dist = np.sqrt(np.sum(coord ** 2, axis=1))
@@ -273,7 +273,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             
             coord = coord / scale
             target = target / scale
-
+    
             # 构造数据字典
             data_dict = dict(
                 coord=coord,
@@ -284,7 +284,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                 centroid=centroid, 
                 scale=scale  # [重点] 这里传入 numpy 数组，方便 DataLoader 自动堆叠
             )
-
+    
             # 4. 应用变换 (GridSample 等)
             if self.transform is not None:
                 data_dict = self.transform(data_dict)
@@ -311,7 +311,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
 `keypoint_swin3d.py`文件内容如下：
 
 ??? note
-    ```python
+    ```Python
     _base_ = ["../_base_/default_runtime.py"]
 
     # ==============================================================================
@@ -351,10 +351,10 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             cRSE="XYZ_RGB",
             fp16_mode=1, 
         ),
-
+    
         hidden_dim=256,
     )
-
+    
     # ==============================================================================
     # Data Settings
     # ==============================================================================
@@ -362,7 +362,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
     batch_size = 8
     data_root = "/home/gzh/point/DataSets"
     grid_size_val = 0.02 # 这里的 grid_size 必须与模型的 quant_size/base_grid_size 匹配
-
+    
     data = dict(
         train=dict(
             type="KeypointDataset",
@@ -411,13 +411,13 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             ],
         ),
     )
-
+    
     # ==============================================================================
     # Training Settings
     # ==============================================================================
     optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.05)
     scheduler = dict(type="CosineAnnealingLR", eta_min=1e-5) 
-
+    
     hooks = [
         dict(type="CheckpointLoader"),
         dict(type="IterationTimer", warmup_iter=10),
@@ -425,7 +425,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         dict(type="KeypointEvaluator"),
         dict(type="CheckpointSaver", save_freq=20)
     ]
-
+    
     ```
 
 ### 3、创建具体网络模型结构
@@ -433,16 +433,16 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
 由于`pointcept`中现有的网络结构基本都是基于点云分类和点云的语义分割的，没有直接可用于点云关键点预测或者回归的，所以我们需要仿照`pointcept/models`路径下，已有的各种模型的网络结构，来修改分类头或者分割头，改为我们的关键点回归头；对于`swin3d`而言，我们在`pointcept/models`文件夹下创建我们的基于`swin3d`的关键点回归头的网络结构文件`keypoint_swin3d.py`，具体代码如下：
 
 ??? note
-    ```python
+    ```Python
     # ==============================================================================
     # pointcept/models/keypoint_swin3d.py
-    # 代码作用：Swin3D 关键点检测模型架构 
+    # 代码作用：Swin3D 关键点检测模型架构
     # ==============================================================================
 
     import torch
     import torch.nn as nn
     from pointcept.models.builder import MODELS, build_model
-
+    
     @MODELS.register_module("KeypointSwin3D")
     class KeypointSwin3D(nn.Module):
         def __init__(self, 
@@ -459,7 +459,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                 in_channels = backbone_conf['channels'][0]
             else:
                 in_channels = 96 # 默认备用值
-
+    
             # 3. 回归头 (Regression Head)
             self.num_keypoints = num_keypoints
             output_dim = num_keypoints * 3
@@ -476,7 +476,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             
             # 4. 损失函数
             self.criterion = nn.MSELoss()
-
+    
         def forward(self, data_dict):
             # === [核心修复] 构造 Swin3D 必须的 coord_feat ===
             if "coord_feat" not in data_dict:
@@ -497,14 +497,14 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                         expected_channels = feat.shape[1]
                 except Exception:
                     expected_channels = feat.shape[1]
-
+    
                 # 根据模型期望决定是否拼接坐标
                 if expected_channels == feat.shape[1] + 3:
                     data_dict["coord_feat"] = torch.cat([coord, feat], dim=1)
                 else:
                     # 默认只使用特征 (如果是 4 通道)
                     data_dict["coord_feat"] = feat
-
+    
             # === 1. 特征提取 (Backbone) ===
             output = self.backbone(data_dict)
             
@@ -513,7 +513,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                 feat = output.F
             else: 
                 feat = output
-
+    
             # === 2. 全局池化 (Global Pooling) ===
             # 使用 offset 将 batch 中每个样本的点特征聚合
             offset = data_dict["offset"].int()
@@ -551,13 +551,13 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                     start = end
             
             global_feat = torch.stack(batch_feats, dim=0) # (B, C)
-
+    
             # === 3. 关键点回归 ===
             pred_flat = self.reg_head(global_feat)
             pred = pred_flat.view(-1, self.num_keypoints, 3)
-
+    
             result_dict = {}
-
+    
             # === 4. Loss 与 监控 ===
             if "target" in data_dict:
                 target = data_dict["target"]
@@ -566,15 +566,15 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                 loss = self.criterion(pred_for_loss, target)
                 if loss.ndim > 0: loss = loss.mean()
                 result_dict["loss"] = loss
-
+    
                 if self.training:
                     with torch.no_grad():
                         k = self.num_keypoints
                         pred_metric = pred.view(-1, k, 3)
                         target_metric = target.view(-1, k, 3)
-
+    
                         dist = torch.norm(pred_metric - target_metric, p=2, dim=-1)
-
+    
                         if "scale" in data_dict:
                             scale = data_dict["scale"]
                             if scale.ndim == 1: scale = scale.view(-1, 1)
@@ -585,7 +585,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                         kp_dist_mean = dist.mean(dim=0)
                         for i in range(k):
                             result_dict[f"train/kp{i}_dist"] = kp_dist_mean[i]
-
+    
             if self.training:
                 return result_dict
             else:
@@ -620,7 +620,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
 新建`tools/inference.py`，代码如下：实现了trian、val、test的单独批量评估，并绘制关键点误差散点图。以及单样本推理并使用open3d绘制关键点可视化
 
 ??? note
-    ```python
+    ```Python
     """
     Keypoint Detection Inference & Visualization Script
     功能：
@@ -637,16 +637,16 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
     import open3d as o3d
     import matplotlib.pyplot as plt
     from tqdm import tqdm
-
+    
     # 添加项目根目录到 python path，确保能导入 pointcept
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-
+    
     from pointcept.utils.config import Config, DictAction
     from pointcept.models import build_model
     from pointcept.datasets import build_dataset, point_collate_fn
     from pointcept.utils.misc import intersection_and_union, make_dirs
     from pointcept.engines.defaults import default_argument_parser
-
+    
     def get_args():
         parser = argparse.ArgumentParser(description="Pointcept Keypoint Inference")
         parser.add_argument("--config-file", default="configs/my_dataset/keypoint_ptv3.py", help="配置文件路径")
@@ -664,7 +664,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         
         args = parser.parse_args()
         return args
-
+    
     def setup_model(cfg, weights_path):
         """加载模型和权重"""
         print(f"=> Building model from config: {cfg.model.type}")
@@ -683,7 +683,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         model.cuda()
         model.eval()
         return model
-
+    
     def create_colored_mesh(geometry_type, center, color, size):
         """创建带颜色的几何体 (球或立方体)"""
         if geometry_type == 'sphere':
@@ -696,22 +696,22 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         mesh.translate(center)
         mesh.paint_uniform_color(color)
         return mesh
-
+    
     def visualize_single(coord, pred_kps, target_kps, args, num_kps):
         """使用 Open3D 可视化 (支持调整点大小)"""
         print(f"=> Visualizing... (Point Size: {args.point_size})")
         geometries = []
-
+    
         # 1. 点云 (灰色)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(coord)
         pcd.paint_uniform_color([0.7, 0.7, 0.7]) # 灰色点云
         geometries.append(pcd)
-
+    
         # 2. 关键点颜色映射
         cmap = plt.get_cmap("jet")
         colors = [cmap(i / (num_kps - 1 if num_kps > 1 else 1))[:3] for i in range(num_kps)]
-
+    
         # 3. 绘制关键点
         for i in range(num_kps):
             # 真实值：圆球 (Sphere)
@@ -722,7 +722,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             # 预测值：正方体 (Cube)
             cube = create_colored_mesh('box', pred_kps[i], colors[i], args.cube_size)
             geometries.append(cube)
-
+    
         # 4. [修改核心] 使用 Visualizer 来控制渲染选项
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name=f"Sample {args.idx} (Sphere=GT, Cube=Pred)", width=1024, height=768)
@@ -746,7 +746,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         if idx >= len(dataset):
             print(f"Error: Index {idx} out of bounds (Dataset size: {len(dataset)})")
             return
-
+    
         # 1. 获取数据
         data_dict = dataset[idx]
         # Collate: 即使是单个样本，也需要伪造成 batch 为 1 的形式 (增加 batch 维度)
@@ -756,13 +756,13 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         for key in data_dict:
             if isinstance(data_dict[key], torch.Tensor):
                 data_dict[key] = data_dict[key].cuda(non_blocking=True)
-
+    
         # 2. 推理
         with torch.no_grad():
             result = model(data_dict)
             # 兼容不同的返回格式 (有的模型返回字典，有的返回 Tensor)
             pred = result["pred"] if isinstance(result, dict) else result
-
+    
         # 3. 数据后处理 (GPU -> CPU -> Numpy)
         # pred shape: (1, K, 3) -> (K, 3)
         # target shape: (1, K, 3) -> (K, 3)
@@ -772,7 +772,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         target = None
         if "target" in data_dict:
             target = data_dict["target"].view(-1, num_kps, 3).cpu().numpy()[0]
-
+    
         # 获取点云坐标用于可视化 (优先用原始 coord，如果没有则用 grid_coord * grid_size)
         coord = data_dict["coord"].cpu().numpy()
         
@@ -784,10 +784,10 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             # 如果没有 scale 只有 grid_size，且 target 是体素坐标，则用 grid_size
             scale = data_dict["grid_size"]
             if isinstance(scale, torch.Tensor): scale = scale.item()
-
+    
         print(f"\n====== Inference Result [Sample IDX: {idx}] ======")
         print(f"Scale Factor: {scale}")
-
+    
         if target is not None:
             # 计算欧氏距离
             # 注意：pred 和 target 目前通常是在归一化坐标系下
@@ -795,7 +795,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             
             # 逆归一化到原始物理尺度
             real_diff = diff * scale 
-
+    
             print("-" * 40)
             print(f"{'Keypoint ID':<15} | {'Error (Original Scale)':<25}")
             print("-" * 40)
@@ -860,10 +860,10 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             ax.set_ylabel('Error (m)')
             ax.legend(loc='upper right', fontsize=8)
             ax.grid(True, which='both', linestyle='--', alpha=0.7)
-
+    
         plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # 调整布局防止重叠
         plt.show() # 弹出窗口
-
+    
     def inference_batch(cfg, model, dataset, args):
         """批量推理逻辑"""
         print(f"=> Start Batch Inference on [{args.subset}] set...")
@@ -875,10 +875,10 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
             collate_fn=point_collate_fn,
             pin_memory=True
         )
-
+    
         num_kps = cfg.model.num_keypoints
         all_errors = [] # 存储所有样本所有关键点的误差
-
+    
         model.eval()
         with torch.no_grad():
             for i, data_dict in enumerate(tqdm(dataloader)):
@@ -909,9 +909,9 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
                     # Fallback logic
                     g = data_dict["grid_size"]
                     dist = dist * g
-
+    
                 all_errors.append(dist.cpu().numpy())
-
+    
         # Concatenate all batches: (Total_Samples, K)
         all_errors = np.concatenate(all_errors, axis=0)
         
@@ -919,7 +919,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         mean_per_kp = np.mean(all_errors, axis=0)
         std_per_kp = np.std(all_errors, axis=0)
         total_mean = np.mean(all_errors)
-
+    
         print("\n====== Batch Inference Statistics ======")
         print(f"Total Samples: {all_errors.shape[0]}")
         print("-" * 65)
@@ -930,11 +930,11 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         print("-" * 65)
         print(f"{'OVERALL':<15} | {total_mean:.5f}")
         print("-" * 65)
-
+    
         # [新增] 调用绘图函数
         print("=> Plotting error distribution...")
         plot_batch_errors(all_errors, num_kps)
-
+    
     def main():
         args = get_args()
         
@@ -956,7 +956,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
         dataset = build_dataset(dataset_cfg)
         
         print(f"=> Loaded {len(dataset)} samples from {args.subset} set.")
-
+    
         # 4. 执行推理
         if args.idx != -1:
             # 单样本模式
@@ -1016,7 +1016,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
     -----------------------------------------------------------------
     OVERALL         | 31.64057
     -----------------------------------------------------------------
-
+    
     ## 基于 Pointcept-PTv1 模型的推理脚本
     export PYTHONPATH=.
     python tools/inference.py \
@@ -1041,7 +1041,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
     -----------------------------------------------------------------
     OVERALL         | 27.08312
     -----------------------------------------------------------------
-
+    
     ## 基于 Pointcept-PTv2 模型的推理脚本
     python tools/inference.py \
         --config-file configs/my_dataset/keypoint_ptv2.py \
@@ -1093,7 +1093,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
     """
     if __name__ == "__main__":
         main()
-
+    
     ```
 
 例如，
@@ -1117,7 +1117,7 @@ $l$ 层的体素如何通过下采样变成 $l+1$ 层的体素呢？$l+1$ 层是
     ====== Inference Result [Sample IDX: 10] ======
     Scale Factor: 873.6885986328125
     ----------------------------------------
-    Keypoint ID     | Error (Original Scale)   
+    Keypoint ID     | Error (Original Scale)
     ----------------------------------------
     KP 0            | 12.1654
     KP 1            | 6.9847

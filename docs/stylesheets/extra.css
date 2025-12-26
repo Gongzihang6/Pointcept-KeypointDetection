@@ -140,3 +140,79 @@ footer.md-footer { background-color: #ffffff !important; color: #333333 !importa
 .md-main__inner.md-grid {
     max-width: 85% !important;
 }
+
+/* ==========================================================================
+   5. 主题颜色选择器样式
+   ========================================================================== */
+/* 提示语样式 */
+.theme-switcher-title {
+    font-size: 0.9em;       /* 字体稍微小一点，显得精致 */
+    font-weight: bold;      /* 加粗 */
+    color: var(--md-default-fg-color--light); /* 使用主题自带的淡色变量，自动适配深色模式 */
+    margin-bottom: 8px;     /* 和下面的按钮拉开一点距离 */
+    display: flex;          /* 布局设置 */
+    align-items: center;    /* 文字垂直居中 */
+    gap: 8px;               /* 图标和文字的间距 */
+}
+
+
+/* 颜色选择器容器 */
+.color-picker-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px; /* 按钮之间的间距 */
+    margin: 1em 0;
+}
+
+/* 按钮样式 */
+.color-btn {
+    border: none;
+    color: white; /* 文字颜色 */
+    padding: 4px 12px;
+    border-radius: 4px; /* 圆角 */
+    font-size: 0.85em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: transform 0.2s, opacity 0.2s;
+    outline: none;
+}
+
+/* 鼠标悬停效果 */
+.color-btn:hover {
+    transform: scale(1.1); /* 放大一点点 */
+    opacity: 0.9;
+}
+
+/* 适配：白色背景的颜色文字需要变黑（比如 white 主题） */
+.color-btn[data-color="white"] {
+    background-color: #ffffff !important;
+    color: #333;
+    border: 1px solid #ddd;
+}
+
+
+/* 修改 MkDocs 正文中的高亮样式 */
+.md-typeset mark {
+    /* 1. 背景色：使用 RGBA 设置一个淡淡的黄色 (最后一位 0.3 是透明度，越小越淡) */
+    background-color: rgba(255, 215, 0, 0.3); 
+    
+    /* 2. 字体颜色：设置为深赭色/深灰色，比纯黑柔和 */
+    color: #b76e00; 
+    
+    /* 3. 加粗字体 */
+    font-weight: bold;
+
+    /* 4. (可选) 增加一点左右内边距，让高亮色块宽一点点，不那么紧促 */
+    padding: 0 4px;
+    
+    /* 5. (可选) 给背景加一点圆角，看起来更润 */
+    border-radius: 4px;
+}
+
+/* 适配深色模式 (Dark Mode) - 这一点很重要！ */
+/* 如果用户切换到深色模式，上面的浅色背景会很刺眼，需要单独设置 */
+[data-md-color-scheme="slate"] .md-typeset mark {
+    /* 深色模式下，背景要暗一些，文字要亮一些 */
+    background-color: rgba(255, 200, 0, 0.15); 
+    color: #ffd54f; 
+}

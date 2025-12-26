@@ -3,3 +3,4 @@ mkdocs-git-revision-date-localized-plugin
 mkdocs-awesome-pages-plugin
 mkdocs-callouts
 mkdocs-glightbox
+mkdocs-caption
