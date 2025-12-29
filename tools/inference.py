@@ -506,6 +506,31 @@ python tools/inference.py \
     --sphere-radius 0.02 \
     --cube-size 0.02
 
+
+## 基于ptv3_plus的推理脚本
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_ptv3_plus.py \
+    --weights exp/keypoint_ptv3_plus/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+
+====== Batch Inference Statistics ======
+Total Samples: 28
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 27.34802            | 21.18443
+KP 1            | 24.23499            | 20.26222
+KP 2            | 33.68962            | 21.03918
+KP 3            | 26.90525            | 18.14697
+KP 4            | 29.70839            | 17.92249
+KP 5            | 31.32251            | 21.76398
+-----------------------------------------------------------------
+OVERALL         | 28.86813
+-----------------------------------------------------------------
 """
 if __name__ == "__main__":
     main()

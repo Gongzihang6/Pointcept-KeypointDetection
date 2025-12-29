@@ -18,7 +18,10 @@ from .keypoint_ptv2 import KeypointPTv2     # 基于PointTransformerV2的关键�
 from .keypoint_swin3d import KeypointSwin3D     # 基于Swin3D的关键点检测模型
 from .keypoint_oa_cnns import KeypointOACNNs    # 基于OA-CNNs的关键点检测模型
 from .keypoint_stratified_transformer import KeypointStratifiedTransformer     # 基于StratifiedTransformer的关键点检测模型
-from .keypoint_sparse_unet import KeypointSparseUNet
+from .keypoint_sparse_unet import KeypointSparseUNet    # 基于SparseUNet的关键点检测模型
+
+from .keypoint_ptv3_plus import PointTransformerV3Plus, KeypointPTv3Plus    # 基于PointTransformerV3Plus的关键点检测模型
+
 
 from .swin3d import *
 

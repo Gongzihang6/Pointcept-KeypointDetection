@@ -65,6 +65,11 @@ python tools/train.py --config-file configs/my_dataset/keypoint_stratified_trans
 
 ## 基于sparse_unet的关键点预测模型
 python tools/train.py --config-file configs/my_dataset/keypoint_sparse_unet.py
+
+## 基于PointTransformerV3Plus的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_ptv3_plus.py
+# 恢复训练
+python tools/train.py --config-file configs/my_dataset/keypoint_ptv3_plus.py --options resume=True weight=exp/keypoint_ptv3_plus/model/model_last.pth
 """
 if __name__ == "__main__":
     main()

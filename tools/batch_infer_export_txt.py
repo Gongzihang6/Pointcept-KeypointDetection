@@ -460,6 +460,30 @@ python tools/batch_infer_export_txt.py \
     --sphere-radius 0.02 \
     --cube-size 0.02 \
     --save-dir 预测关键点坐标/StratifiedTransformer
+
+## 基于PointTransformerV3Plus模型的批量推理脚本
+export PYTHONPATH=.
+python tools/batch_infer_export_txt.py \
+    --config-file configs/my_dataset/keypoint_ptv3_plus.py \
+    --weights exp/keypoint_ptv3_plus/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02 \
+    --save-dir 预测关键点坐标/PointTransformerV3Plus
+
+## 基于PointTransformerV3模型的批量推理脚本
+export PYTHONPATH=.
+python tools/batch_infer_export_txt.py \
+    --config-file configs/my_dataset/keypoint_ptv3.py \
+    --weights exp/keypoint_ptv3/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02 \
+    --save-dir 预测关键点坐标/PointTransformerV3
 """
 if __name__ == "__main__":
     main()
