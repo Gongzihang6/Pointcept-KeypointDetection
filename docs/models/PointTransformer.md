@@ -3,18 +3,18 @@
 </p>
 
 <div class="color-picker-container">
-  <button class="color-btn" data-color="red" style="background-color: #ef5350;">red</button>
-  <button class="color-btn" data-color="pink" style="background-color: #ec407a;">pink</button>
-  <button class="color-btn" data-color="purple" style="background-color: #ab47bc;">purple</button>
-  <button class="color-btn" data-color="indigo" style="background-color: #5c6bc0;">indigo</button>
-  <button class="color-btn" data-color="blue" style="background-color: #42a5f5;">blue</button>
-  <button class="color-btn" data-color="cyan" style="background-color: #26c6da;">cyan</button>
-  <button class="color-btn" data-color="teal" style="background-color: #26a69a;">teal</button>
-  <button class="color-btn" data-color="green" style="background-color: #66bb6a;">green</button>
-  <button class="color-btn" data-color="orange" style="background-color: #ffa726;">orange</button>
-  <button class="color-btn" data-color="brown" style="background-color: #8d6e63;">brown</button>
-  <button class="color-btn" data-color="grey" style="background-color: #bdbdbd;">grey</button>
-  <button class="color-btn" data-color="black" style="background-color: #000000;">black</button>
+  <button class="color-btn" data-color="red" style="background-color: #ef5350;"> red </button>
+  <button class="color-btn" data-color="pink" style="background-color: #ec407a;"> pink </button>
+  <button class="color-btn" data-color="purple" style="background-color: #ab47bc;"> purple </button>
+  <button class="color-btn" data-color="indigo" style="background-color: #5c6bc0;"> indigo </button>
+  <button class="color-btn" data-color="blue" style="background-color: #42a5f5;"> blue </button>
+  <button class="color-btn" data-color="cyan" style="background-color: #26c6da;"> cyan </button>
+  <button class="color-btn" data-color="teal" style="background-color: #26a69a;"> teal </button>
+  <button class="color-btn" data-color="green" style="background-color: #66bb6a;"> green </button>
+  <button class="color-btn" data-color="orange" style="background-color: #ffa726;"> orange </button>
+  <button class="color-btn" data-color="brown" style="background-color: #8d6e63;"> brown </button>
+  <button class="color-btn" data-color="grey" style="background-color: #bdbdbd;"> grey </button>
+  <button class="color-btn" data-color="black" style="background-color: #000000;"> black </button>
 </div>
 
 <script>
@@ -449,4 +449,94 @@ $$
 2. **融合（Fusion）：** 对每一个小方块内的所有点进行聚合，生成 **一个** 新的代表点（Pooling Point）。
 
 具体来说，对小方块内所有点特征进行线性变换，然后对每一个样本点云进行网格划分，同一个网格中点的坐标采用平均池化，用网格内所有点的质心做代表；同一个网格中点的特征采用最大池化，每一维特征选择所有点中值最大的作为代表，从 $(n,c)$ 到 $(c)$。
+
+## PTv3
+
+论文标题为：Point Transformer V3: Simpler, Faster, Stronger
+
+关键词：序列化（Serialization）、效率优先（Simpler, Faster, Stronger）、扩大感受野、多数据集联合训练。
+
+### 背景
+
+3D 骨干网络的发展受限于“数据规模”和“感受野规模”，以往的模型（如 PTv2）为了追求局部结构的精确性（比如计算注意力的时候，依然使用 KNN 查询获取邻居点），牺牲了太多效率。
+
+同时，作者发现 PTv2 存在如下问题：
+
+1. **效率瓶颈：** KNN 查询占据了 28%的推理时间，复杂的相对位置编码（RPE）占据了 26%的时间。这些操作不仅慢，还内存消耗大，导致无法扩展感受野 ；
+2. **感受野受限：** 为了保持效率，PTv2 的感受野只能限制在 16 个点左右，限制了长距离上下文的获取 ；
+3. **无序性带来的困难：** 点云的无序性（Permutation Invariance）使得像图像那样高效处理变得困难；
+
+==核心创新与网络架构==
+
+1、点云序列化（Point Cloud Serialization）
+
+- 放弃无序集合的执念，通过空间填充曲线（例如 Z-order 或 Hilbert 曲线）将 3D 点云排列成 1D 序列；从而将无序点云转化为结构化数据，使得邻近的点在序列中也尽可能邻近，从而能够利用高效的滑窗机制。
+
+2、序列化注意力（Serialized Attention）
+
+- 在序列化后的点云上使用基于 Patch 的注意力机制（类似于 Swin Transformer）；
+- 提出了 Shift Mask 和 Shuffle 等策略来促进不同 Patch 之间的信息交互，打破固定窗口的限制；
+- 为了极致效率，PTv3 放弃了 Vector Attenion，回归到了点积注意力，这使得它能利用 FlashAttention 等加速技术。
+
+3、xCPE（Enhanced Conditional Positional Encoding）
+
+- 移除了耗时的 RPE，改用一个前置的稀疏卷积层（Sparse Convolution）来隐式编码位置信息，效率极高。
+
+==关键贡献与效果==
+
+- **规模即正义：** 证明了通过简化设计（放弃精确的 kNN，使用序列化近似），换取更大的 **规模**（感受野从 16 点扩展到 1024 点）是值得的 。
+- **极致效率：** 相比 PTv2，推理速度提升 **3.3 倍**，内存消耗降低 **10 倍** 。
+- **效果：** 在室内（ScanNet, S3DIS）和室外（nuScenes, Waymo）共 20 多个任务上达到 SOTA。特别是结合多数据集联合训练（PPT），ScanNet mIoU 达到了 **79.4%** 。
+
+### Point Cloud Serialization
+
+ptv3 的核心突破在于抛弃了传统点云网络中昂贵的邻域查询（KNN 或 Ball Query），转而使用空间填充曲线来实现高效的局部性分组。
+
+==为什么需要序列化？==
+
+传统做法（如 ptv2/v1，PointNet++），不对点做任何处理，将点集视为无序集合，点在内存中是乱序存储的；为了做卷积或 attention，必须先找到邻居，确定计算注意力或者卷积的范围，这需要 KNN 或 Radius Search 来搜寻邻居，这些操作设计大量的随机内存访问（Random Memory Access），对 GPU 极其不友好，导致显存占用高、速度慢。
+
+ptv3 通过按照某种特定规则，如（z-order 或 Hilbert 曲线），把点云按照空间位置排好序，通常按照这种空间填充曲线的连接顺序排序，这样在曲线顺序上相邻（内存里相邻）的点，在 3D 空间里大概率也是相邻的。这样我们就不需要进行耗时的 KNN 来找邻居了，直接切一段内存（Patch）出来算 Attention 就可以了。
+
+==序列化的具体流程==
+
+ptv3 的序列化过程可以概括为：网格化（Grid）-> 编码（code）-> 排序（sort）-> 分块(Patch)。
+
+第一步：网格化与坐标映射（Grid Sampling）
+
+首先将连续的浮点数坐标 $(x,y,z)$ 映射到离散的整数网格坐标 $(x_{idx},y_{idx},z_{idx})$ 上，这一步有点像体素化，目的是为了方便后续的编码。
+
+第二步：空间填充曲线编码（Space-Filling Curve Encoding）
+
+这一步是序列化的灵魂是，是决定点云序列顺序的关键。ptv3 通常使用 z-order curve（Morton Code）或 Hilbert Curve。它们可以将 3D 的整数坐标(x, y, z)转化成一个为唯一的 1D 整数，并且具有良好的空间局部性，也就是在 3D 空间中靠近的两个点，它们的 Morton Code 数值通常也非常接近。
+
+第三步：排序（Sorting）
+
+根据计算出的 Morton Code 二进制值得大小对所有点进行重排。重排后，内存中得点云不再是乱序的，而是根据 Morton Code 的大小顺序在内存中连续排列，这些点在空间中会沿着 Z 字形曲线在空间中蜿蜒排列。
+
+第四步：分块（Patching/Flattening）
+
+将排好序的长序列，直接按照固定的长度（Block Size，例如 1024 或 2048）切分成若干个 Patch，这一步就是用来确定注意力的计算范围的，相比于 knn 的邻域查询，由于查询复杂，邻域一般设为 16 或者 32，很难提升，但是这里由于这个长序列在内存中连续排列，可以轻松通过 reshape 实现分块，速度极快，同时邻域可以轻松设置的很大，如 1024 或 2048，且对耗时没有影响。
+
+### 序列化注意力（Serialized Attention）
+
+完成上述序列化之后，3D 任务就变成了 1D 序列任务。
+
+局部 attention，在每一个 patch 内部进行 self-attention 运算（标准的点积注意力），对 patch 内部所有点进行特征更新；
+
+### 位置编码（xCPE）
+
+在将 3D 点云使用序列化展平为 1D 序列之前，对 3D 点云进行稀疏卷积，将计算结果作为位置编码，加到点的特征中，然后展平的 1D 序列的点的特征中就包含了位置编码信息，相比于 ptv2 使用坐标差，经过 mlp 映射的坐标编码计算方式来说，避免了 KNN 邻域查询，同时注意力退化使用标准点积注意力，可以通过 FlashAttention 来加速计算。
+
+但是简单的排序切片有一个致命弱点：**边界效应**。比如点 A 索引 1023，点 B 在索引 1024，它俩在 3D 空间可能紧挨着，但是却被强行切分到了两个不同的 Patch 里，导致无法在注意力机制中交互。解决方法如下：
+
+- 多重排序，在不同的 Transformer 层中，使用不同的排序逻辑（例如层 1 用 z-order，层 2 用 Hilbert，或者对坐标进行 shift 再排序），处理之后，这一层的边界点，在下一层重新排序后可能就变成了中心点，通过多层堆叠，信息就能在整个点云中流动。
+
+换句话说，就是每次计算序列注意力之前，使用不同的序列化顺序，得到不同的 1D 序列，这样每一层计算注意力的邻居都不同，这一层可能将邻居拆开了，可能下一层就在一起了，这样注意力的交互就能跨越更大范围，在整个点云间流动。
+
+
+
+参考：
+
+[Gemini 对话记录](https://gemini.google.com/share/ec86de0c8113)
 

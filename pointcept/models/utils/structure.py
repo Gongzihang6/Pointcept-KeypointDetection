@@ -19,32 +19,31 @@ from pointcept.models.utils import (
 
 class Point(Dict):
     """
-    Point Structure of Pointcept
+    Pointcept 的 Point 结构
 
-    A Point (point cloud) in Pointcept is a dictionary that contains various properties of
-    a batched point cloud. The property with the following names have a specific definition
-    as follows:
+    Pointcept 中的 Point（点云）是一个字典，包含批处理点云的各种属性。
+    具有以下名称的属性具有特定定义，如下所示：
 
-    - "coord": original coordinate of point cloud;
-    - "grid_coord": grid coordinate for specific grid size (related to GridSampling);
-    Point also support the following optional attributes:
-    - "offset": if not exist, initialized as batch size is 1;
-    - "batch": if not exist, initialized as batch size is 1;
-    - "feat": feature of point cloud, default input of model;
-    - "grid_size": Grid size of point cloud (related to GridSampling);
-    (related to Serialization)
-    - "serialized_depth": depth of serialization, 2 ** depth * grid_size describe the maximum of point cloud range;
-    - "serialized_code": a list of serialization codes;
-    - "serialized_order": a list of serialization order determined by code;
-    - "serialized_inverse": a list of inverse mapping determined by code;
-    (related to Sparsify: SpConv)
-    - "sparse_shape": Sparse shape for Sparse Conv Tensor;
-    - "sparse_conv_feat": SparseConvTensor init with information provide by Point;
+    - "coord": 点云的原始坐标；
+    - "grid_coord": 特定网格大小的网格坐标（与 GridSampling 相关）；
+    Point 还支持以下可选属性：
+    - "offset": 如果不存在，初始化为批大小为 1；
+    - "batch": 如果不存在，初始化为批大小为 1；
+    - "feat": 点云的特征，模型的默认输入；
+    - "grid_size": 点云的网格大小（与 GridSampling 相关）；
+    (与序列化相关)
+    - "serialized_depth": 序列化的深度，2 ** depth * grid_size 描述点云范围的最大值；
+    - "serialized_code": 序列化代码列表；
+    - "serialized_order": 由代码确定的序列化顺序列表；
+    - "serialized_inverse": 由代码确定的反向映射列表；
+    (与稀疏化相关：SpConv)
+    - "sparse_shape": 稀疏卷积张量的稀疏形状；
+    - "sparse_conv_feat": 使用 Point 提供的信息初始化的 SparseConvTensor；
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # If one of "offset" or "batch" do not exist, generate by the existing one
+        # 如果 "offset" 或 "batch" 中的一个不存在，则通过现有的一个生成
         if "batch" not in self.keys() and "offset" in self.keys():
             self["batch"] = offset2batch(self.offset)
         elif "offset" not in self.keys() and "batch" in self.keys():
@@ -59,10 +58,10 @@ class Point(Dict):
         self["order"] = order
         assert "batch" in self.keys()
         if "grid_coord" not in self.keys():
-            # if you don't want to operate GridSampling in data augmentation,
-            # please add the following augmentation into your pipline:
-            # dict(type="Copy", keys_dict={"grid_size": 0.01}),
-            # (adjust `grid_size` to what your want)
+            # 如果您不想在数据增强中操作 GridSampling，
+            # 请在您的管道中添加以下增强：
+            # dict(type="Copy", keys_dict={"grid_size": 0.01})，
+            # （根据您的需要调整 `grid_size`）
             assert {"grid_size", "coord"}.issubset(self.keys())
 
             self["grid_coord"] = torch.div(
@@ -70,20 +69,20 @@ class Point(Dict):
             ).int()
 
         if depth is None:
-            # Adaptive measure the depth of serialization cube (length = 2 ^ depth)
+            # 自适应测量序列化立方体的深度（长度 = 2 ^ depth）
             depth = int(self.grid_coord.max() + 1).bit_length()
         self["serialized_depth"] = depth
-        # Maximum bit length for serialization code is 63 (int64)
+        # 序列化代码的最大位长度为 63（int64）
         assert depth * 3 + len(self.offset).bit_length() <= 63
-        # Here we follow OCNN and set the depth limitation to 16 (48bit) for the point position.
-        # Although depth is limited to less than 16, we can encode a 655.36^3 (2^16 * 0.01) meter^3
-        # cube with a grid size of 0.01 meter. We consider it is enough for the current stage.
-        # We can unlock the limitation by optimizing the z-order encoding function if necessary.
+        # 我们遵循 OCNN，为点位置设置深度限制为 16（48位）。
+        # 尽管深度限制为小于 16，我们可以使用网格大小为 0.01 米编码 655.36^3 (2^16 * 0.01) 米^3
+        # 的立方体。我们认为这对于当前阶段来说已经足够。
+        # 我们可以通过优化 z-order 编码函数来解除限制。
         assert depth <= 16
 
-        # The serialization codes are arranged as following structures:
-        # [Order1 ([n]),
-        #  Order2 ([n]),
+        # 序列化代码按照以下结构排列：
+        # [Order1 ([n])，
+        #  Order2 ([n])，
         #   ...
         #  OrderN ([n])] (k, n)
         code = [
@@ -111,21 +110,20 @@ class Point(Dict):
 
     def sparsify(self, pad=96):
         """
-        Point Cloud Serialization
+        点云稀疏化
 
-        Point cloud is sparse, here we use "sparsify" to specifically refer to
-        preparing "spconv.SparseConvTensor" for SpConv.
+        点云是稀疏的，这里使用 "sparsify" 特指为 SpConv 准备 "spconv.SparseConvTensor"。
 
-        relay on ["grid_coord" or "coord" + "grid_size", "batch", "feat"]
+        依赖于 ["grid_coord" 或 "coord" + "grid_size", "batch", "feat"]
 
-        pad: padding sparse for sparse shape.
+        pad: 为稀疏形状填充的填充值。
         """
         assert {"feat", "batch"}.issubset(self.keys())
         if "grid_coord" not in self.keys():
-            # if you don't want to operate GridSampling in data augmentation,
-            # please add the following augmentation into your pipline:
-            # dict(type="Copy", keys_dict={"grid_size": 0.01}),
-            # (adjust `grid_size` to what your want)
+            # 如果您不想在数据增强中操作 GridSampling，
+            # 请在您的管道中添加以下增强：
+            # dict(type="Copy", keys_dict={"grid_size": 0.01})，
+            # （根据您的需要调整 `grid_size`）
             assert {"grid_size", "coord"}.issubset(self.keys())
             self["grid_coord"] = torch.div(
                 self.coord - self.coord.min(0)[0], self.grid_size, rounding_mode="trunc"
@@ -158,12 +156,12 @@ class Point(Dict):
             ocnn is not None
         ), "Please follow https://github.com/octree-nn/ocnn-pytorch install ocnn."
         assert {"feat", "batch"}.issubset(self.keys())
-        # add 1 to make grid space support shift order
+        # 加 1 使网格空间支持移位顺序
         if "grid_coord" not in self.keys():
-            # if you don't want to operate GridSampling in data augmentation,
-            # please add the following augmentation into your pipline:
-            # dict(type="Copy", keys_dict={"grid_size": 0.01}),
-            # (adjust `grid_size` to what your want)
+            # 如果您不想在数据增强中操作 GridSampling，
+            # 请在您的管道中添加以下增强：
+            # dict(type="Copy", keys_dict={"grid_size": 0.01})，
+            # （根据您的需要调整 `grid_size`）
             assert {"grid_size", "coord"}.issubset(self.keys())
             self["grid_coord"] = torch.div(
                 self.coord - self.coord.min(0)[0], self.grid_size, rounding_mode="trunc"
@@ -176,7 +174,7 @@ class Point(Dict):
         if full_depth is None:
             full_depth = 1
         self["depth"] = depth
-        assert depth <= 16  # maximum in ocnn
+        assert depth <= 16  # OCNN 中的最大值
 
         # [0, 2**depth] -> [0, 2] -> [-1, 1]
         coord = self.grid_coord / 2 ** (self.depth - 1) - 1.0
@@ -197,7 +195,7 @@ class Point(Dict):
 
         query_pts = torch.cat([self.grid_coord, point.batch_id], dim=1).contiguous()
         inverse = octree.search_xyzb(query_pts, depth, True)
-        assert torch.sum(inverse < 0) == 0  # all mapping should be valid
+        assert torch.sum(inverse < 0) == 0  # 所有映射都应该是有效的
         inverse_ = torch.unique(inverse)
         order = torch.zeros_like(inverse_).scatter_(
             dim=0,

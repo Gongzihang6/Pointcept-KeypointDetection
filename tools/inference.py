@@ -347,31 +347,6 @@ def main():
 
 
 """
-## 基于 Pointcept-PTv3 模型的推理脚本
-python tools/inference.py \
-    --config-file configs/my_dataset/keypoint_ptv3.py \
-    --weights exp/keypoint_ptv3/model/model_best.pth \
-    --subset test \
-    --idx -1 \
-    --visualize \
-    --sphere-radius 0.02 \
-    --cube-size 0.02
-====== Batch Inference Statistics ======
-Total Samples: 28
------------------------------------------------------------------
-Keypoint ID     | Mean Error           | Std Dev             
------------------------------------------------------------------
-KP 0            | 22.65371            | 13.36939
-KP 1            | 21.20184            | 13.95168
-KP 2            | 30.23071            | 20.58898
-KP 3            | 27.92994            | 20.37176
-KP 4            | 32.97409            | 18.85650
-KP 5            | 34.39021            | 21.52718
------------------------------------------------------------------
-OVERALL         | 28.23009
------------------------------------------------------------------
-
-
 
 ## 基于 Pointcept-OctFormer 模型的推理脚本
 python tools/inference.py \
@@ -444,6 +419,30 @@ KP 4            | 25.64672            | 13.56527
 KP 5            | 31.95988            | 13.46944
 -----------------------------------------------------------------
 OVERALL         | 26.98319
+-----------------------------------------------------------------
+
+## 基于 Pointcept-PTv3 模型的推理脚本
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_ptv3.py \
+    --weights exp/keypoint_ptv3/model/model_best.pth \
+    --subset test \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 28
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 22.65371            | 13.36939
+KP 1            | 21.20184            | 13.95168
+KP 2            | 30.23071            | 20.58898
+KP 3            | 27.92994            | 20.37176
+KP 4            | 32.97409            | 18.85650
+KP 5            | 34.39021            | 21.52718
+-----------------------------------------------------------------
+OVERALL         | 28.23009
 -----------------------------------------------------------------
 
 
