@@ -70,6 +70,9 @@ python tools/train.py --config-file configs/my_dataset/keypoint_sparse_unet.py
 python tools/train.py --config-file configs/my_dataset/keypoint_ptv3_plus.py
 # 恢复训练
 python tools/train.py --config-file configs/my_dataset/keypoint_ptv3_plus.py --options resume=True weight=exp/keypoint_ptv3_plus/model/model_last.pth
+
+## 基于Swin3DPlus的关键点预测模型
+python tools/train.py --config-file configs/my_dataset/keypoint_swin3d_plus.py
 """
 if __name__ == "__main__":
     main()

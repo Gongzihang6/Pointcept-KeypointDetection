@@ -21,7 +21,7 @@ from .keypoint_stratified_transformer import KeypointStratifiedTransformer     #
 from .keypoint_sparse_unet import KeypointSparseUNet    # 基于SparseUNet的关键点检测模型
 
 from .keypoint_ptv3_plus import PointTransformerV3Plus, KeypointPTv3Plus    # 基于PointTransformerV3Plus的关键点检测模型
-
+from .keypoint_swin3d_plus import KeypointSwin3DVote    # 基于Swin3DPlus的关键点检测模型
 
 from .swin3d import *
 
