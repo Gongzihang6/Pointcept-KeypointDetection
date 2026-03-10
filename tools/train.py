@@ -73,6 +73,10 @@ python tools/train.py --config-file configs/my_dataset/keypoint_ptv3_plus.py --o
 
 ## 基于Swin3DPlus的关键点预测模型
 python tools/train.py --config-file configs/my_dataset/keypoint_swin3d_plus.py
+
+## 基于Swin3D的SemanticKITTI语义分割模型（迷你版，快速过拟合测试）
+python tools/train.py --config-file configs/semantic_kitti/semseg-swin3d-mini.py
+
 """
 if __name__ == "__main__":
     main()
