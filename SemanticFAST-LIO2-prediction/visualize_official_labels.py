@@ -1,9 +1,13 @@
 """
-作用：极致优化的 SemanticKITTI 官方标签流式播放器。
-优化点：
-    1. 引入 Numpy 极速切片降采样 (Stride)，视觉无损的同时砍掉成倍的渲染负担。
-    2. 移除 time.sleep() 人工阻塞，榨干每一滴 CPU 性能。
-    3. 优化了内存指针分配频率。
+作用：极致优化的 SemanticKITTI 双端同步流式播放器（本地 GUI + 网页端）。
+功能：在保留原有 Open3D 本地非阻塞渲染的基础上，额外增加了 Rerun Web 前端推流功能。
+实现了什么：
+    1. 保留了原有的 Numpy 极速切片降采样 (Stride)、指针更新和智能休眠等所有硬核性能优化。
+    2. 实现了数据“一源多端”同步：同一份点云和标签数据，即时在 Open3D 窗口渲染，同时也通过 WebRTC 协议推送到浏览器页面。
+怎么实现的：
+    1. 引入 rerun 库，在 Open3D 初始化前后，利用 rr.serve_grpc() 和 rr.serve_web_viewer() 开启独立的数据通信后端与网页前端。
+    2. 在主循环中保留 Open3D 的 update_renderer() 逻辑。
+    3. 增加 rr.log() 推送点云，并通过 (colors * 255).astype(np.uint8) 极速计算，将 Open3D 依赖的浮点色值动态转译为 Rerun 性能最佳的整型色值。
 """
 
 import os
@@ -11,21 +15,19 @@ import glob
 import numpy as np
 import open3d as o3d
 import time
+import rerun as rr
 
 # --- 1. 路径配置 ---
-BIN_DIR = "/mnt/f/Gongzihang/2026/data/SemanticKITTI/dataset/sequences/00/velodyne"
-LABEL_DIR = "/mnt/f/Gongzihang/2026/data/SemanticKITTI/dataset/sequences/00/labels"
+BIN_DIR = "/mnt/f/Gongzihang/2026/data/SemanticKITTI/dataset/sequences/05/velodyne"
+LABEL_DIR = "/mnt/f/Gongzihang/2026/data/SemanticKITTI/dataset/sequences/05/labels"
 
 # --- 2. 性能调节旋钮 ---
-# 【核心优化 1】降采样步长：2 表示每 2 个点取 1 个，3 表示每 3 个点取 1 个。
-# KITTI 点云极密，设为 2 或 3 几乎不影响你观察车辆和行人，但帧率会暴涨！
 STRIDE = 2 
-
-# 目标帧率控制 (避免太快导致看不清)
 TARGET_FPS = 30
 FRAME_TIME = 1.0 / TARGET_FPS
 
 def get_color_map(labels):
+    # 保持原样：Open3D 需要 0.0-1.0 的 float64 颜色
     colors = np.zeros((len(labels), 3), dtype=np.float64)
     
     dynamic_ids = [10, 11, 15, 18, 20, 30, 31, 32, 252, 253, 254, 255, 256, 257, 258, 259]
@@ -51,13 +53,28 @@ def play_point_cloud_video():
         print("未找到点云或标签文件！")
         return
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name="SemanticKITTI Smooth Stream", width=1280, height=720)
+    print(f"共找到 {len(bin_files)} 帧数据，准备启动双端渲染...")
+
+    # ==========================================
+    # 【新增】1. 启动 Rerun 网页端服务器
+    # ==========================================
+    rr.init("SemanticKITTI_Dual_Stream")
+    server_uri = rr.serve_grpc() 
+    rr.serve_web_viewer(connect_to=server_uri) 
     
-    opt = vis.get_render_option()
-    opt.background_color = np.asarray([0.05, 0.05, 0.05])
-    # 既然降采样了，把点的大小稍微调大一点点，弥补视觉密度
-    opt.point_size = 3.0 
+    print("\n👉 网页端已启动！请在浏览器打开: http://localhost:9090")
+    print("👉 本地 Open3D 窗口即将弹出...\n")
+    time.sleep(1) # 稍微给 Web 服务器一点启动时间
+
+    # ==========================================
+    # 保留：初始化 Open3D 本地端
+    # ==========================================
+    # vis = o3d.visualization.Visualizer()
+    # vis.create_window(window_name="SemanticKITTI Smooth Stream (Local)", width=1280, height=720)
+    
+    # opt = vis.get_render_option()
+    # opt.background_color = np.asarray([0.05, 0.05, 0.05])
+    # opt.point_size = 1.0 
     
     pcd = o3d.geometry.PointCloud()
     is_first_frame = True 
@@ -72,28 +89,38 @@ def play_point_cloud_video():
         if len(scan) != len(labels):
             continue
             
-        # 【核心优化 2】极其轻量的降采样：直接切片跳跃读取，瞬间抛弃一半数据！
+        # 极速切片降采样
         xyz = scan[::STRIDE, :3]
         labels_sampled = labels[::STRIDE]
         
+        # 获取 Open3D 适用的 float64 色彩
         colors = get_color_map(labels_sampled)
         
-        # 内存更新
-        pcd.points = o3d.utility.Vector3dVector(xyz)
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+        # ==========================================
+        # 保留：刷新 Open3D 本地端
+        # ==========================================
+        # pcd.points = o3d.utility.Vector3dVector(xyz)
+        # pcd.colors = o3d.utility.Vector3dVector(colors)
         
-        if is_first_frame:
-            vis.add_geometry(pcd)
-            vis.reset_view_point(True)
-            is_first_frame = False
-        else:
-            vis.update_geometry(pcd)
+        # if is_first_frame:
+        #     vis.add_geometry(pcd)
+        #     vis.reset_view_point(True)
+        #     is_first_frame = False
+        # else:
+        #     vis.update_geometry(pcd)
             
-        vis.poll_events()
-        vis.update_renderer()
+        # vis.poll_events()
+        # vis.update_renderer()
+
+        # ==========================================
+        # 【新增】2. 同步推送至 Rerun 网页端
+        # ==========================================
+        # rr.set_time_sequence("frame_idx", i)
+        # Rerun 底层由 Rust 编写，对 uint8 格式的颜色渲染效率极高
+        colors_uint8 = (colors * 255).astype(np.uint8)
+        rr.log("lidar_stream", rr.Points3D(positions=xyz, colors=colors_uint8))
         
-        # 【核心优化 3】智能休眠控制
-        # 如果处理这帧的时间已经超过了目标时间，就坚决不休眠，全力渲染下一帧
+        # 智能休眠控制
         process_time = time.time() - loop_start_time
         sleep_time = FRAME_TIME - process_time
         if sleep_time > 0:

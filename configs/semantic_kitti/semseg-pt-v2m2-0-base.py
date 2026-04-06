@@ -61,7 +61,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "SemanticKITTIDataset"
-data_root = "data/semantic_kitti"
+data_root = "/mnt/f/Gongzihang/2026/data/SemanticKITTI"
 ignore_index = -1
 names = [
     "car",

@@ -38,13 +38,17 @@ model = dict(
         in_channels=4,        # 输入通道: x, y, z, intensity
         num_classes=19,       # SemanticKITTI 的有效语义类别数为 19 类
         
-        base_grid_size=0.05,  # SemanticKITTI 标准体素分辨率 (5厘米)
+        base_grid_size=0.2,  # SemanticKITTI 标准体素分辨率 (5厘米)
         quant_size=50,
         num_layers=4,
         
-        depths=[2, 2, 6, 2],
-        channels=[64, 128, 256, 512],
-        num_heads=[4, 8, 16, 32], # 必须全为偶数
+        # depths=[2, 2, 6, 2],
+        # channels=[64, 128, 256, 512],
+        # num_heads=[4, 8, 16, 32], # 必须全为偶数
+        # window_sizes=[5, 7, 7, 7],
+        depths=[2, 2, 2, 2],
+        channels=[16,32,64,128],
+        num_heads=[2,4,8,16], # 必须全为偶数
         window_sizes=[5, 7, 7, 7],
         
         up_k=3,
@@ -66,7 +70,7 @@ model = dict(
 # ==============================================================================
 # 【极其重要】指向你的微型数据集路径
 data_root = "/home/gzh/point/Pointcept-KeypointDetection/SemanticFAST-LIO2-prediction/SemanticKITTI_Mini"
-grid_size = 0.05
+grid_size = 0.2
 
 data = dict(
     num_classes=19,

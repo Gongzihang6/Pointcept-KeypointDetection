@@ -76,7 +76,7 @@ python tools/train.py --config-file configs/my_dataset/keypoint_swin3d_plus.py
 
 ## 基于Swin3D的SemanticKITTI语义分割模型（迷你版，快速过拟合测试）
 python tools/train.py --config-file configs/semantic_kitti/semseg-swin3d-mini.py
-
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 """
 if __name__ == "__main__":
     main()
