@@ -25,3 +25,5 @@ from .dataloader import MultiDatasetDataloader
 
 # keypoint
 from .keypoint_dataset import KeypointDataset
+
+from .pigseg import PigDataset

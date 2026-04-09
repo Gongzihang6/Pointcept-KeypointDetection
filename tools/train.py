@@ -77,6 +77,18 @@ python tools/train.py --config-file configs/my_dataset/keypoint_swin3d_plus.py
 ## 基于Swin3D的SemanticKITTI语义分割模型（迷你版，快速过拟合测试）
 python tools/train.py --config-file configs/semantic_kitti/semseg-swin3d-mini.py
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+## 基于Swin3D的猪场主体点云语义分割模型训练
+python tools/train.py --config-file configs/pigseg/semseg-swin3d-v1m1-0-base.py
+python tools/infer_npy.py --npy-file /home/gzh/point/Pointcept-KeypointDetection/body_npy_output/test/20260329_165838_641.npy
+
+## 基于SpUNet的猪场主体点云语义分割模型训练
+python tools/train.py --config-file configs/pigseg/semseg-spunet-v1m1-0-base.py
+
+## 基于PTV3的猪场主体点云语义分割模型训练
+python tools/train.py --config-file configs/pigseg/semseg-ptv3-v1m1-0-base.py
+# 恢复训练
+python tools/train.py --config-file configs/pigseg/semseg-ptv3-v1m1-0-base.py --options resume=True weight=exp/PTV3_PigSeg/model/model_last.pth
 """
 if __name__ == "__main__":
     main()
