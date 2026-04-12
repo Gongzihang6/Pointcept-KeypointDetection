@@ -4,7 +4,7 @@ _base_ = ["../_base_/default_runtime.py"]
 # Global Settings
 # ==============================================================================
 epoch = 100 
-save_path = "exp/keypoint_swin3d"
+save_path = "exp/keypoint_swin3d0409"
 # ==============================================================================
 # Model Settings (Swin3D)
 # ==============================================================================
@@ -46,7 +46,7 @@ model = dict(
 # ==============================================================================
 num_worker = 4
 batch_size = 8
-data_root = "/home/gzh/point/DataSets"
+data_root = "KeyPointDataset_Split"
 grid_size_val = 0.02 # 这里的 grid_size 必须与模型的 quant_size/base_grid_size 匹配
 
 data = dict(
@@ -59,7 +59,7 @@ data = dict(
             dict(type="GridSample", grid_size=grid_size_val, hash_type="fnv", mode="train", return_grid_coord=True),
             dict(type="ToTensor"),
             dict(type="Collect", 
-                 keys=("coord", "grid_coord", "feat", "target","coord_feat", "grid_size", "scale", "batch"), 
+                 keys=("coord", "grid_coord", "feat", "target","coord_feat", "grid_size", "scale"), 
                  offset_keys_dict=dict(offset="coord"), 
                  feat_keys=("feat",),
                  coord_feat_keys=("coord_feat",))
@@ -75,7 +75,7 @@ data = dict(
             dict(type="GridSample", grid_size=grid_size_val, hash_type="fnv", mode="train", return_grid_coord=True),
             dict(type="ToTensor"),
             dict(type="Collect", 
-                 keys=("coord", "grid_coord", "feat", "target", "coord_feat", "grid_size", "scale", "batch"), 
+                 keys=("coord", "grid_coord", "feat", "target", "coord_feat", "grid_size", "scale"), 
                  offset_keys_dict=dict(offset="coord"), 
                  feat_keys=("feat",),
                  coord_feat_keys=("coord_feat",))
@@ -90,7 +90,7 @@ data = dict(
             dict(type="GridSample", grid_size=grid_size_val, hash_type="fnv", mode="train", return_grid_coord=True),
             dict(type="ToTensor"),
             dict(type="Collect", 
-                 keys=("coord", "grid_coord", "feat", "target", "coord_feat", "grid_size", "scale", "batch"), 
+                 keys=("coord", "grid_coord", "feat", "target", "coord_feat", "grid_size", "scale"), 
                  offset_keys_dict=dict(offset="coord"), 
                  feat_keys=("feat",),
                  coord_feat_keys=("coord_feat",))

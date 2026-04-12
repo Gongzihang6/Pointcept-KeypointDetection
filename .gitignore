@@ -2,6 +2,8 @@ SemanticFAST-LIO2-prediction/SemanticKITTI_Mini/
 *.pcd
 *.zip
 body_npy_output/
+KeyPointDataset_Split/
+Processed_Pig_Dataset
 预测关键点坐标/
 .venv/
 .venv_jazzy/

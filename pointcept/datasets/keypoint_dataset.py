@@ -33,35 +33,35 @@ class KeypointDataset(Dataset):
     def _get_file_list(self):
         split_path = os.path.join(self.data_root, self.split)
         if not os.path.exists(split_path):
-            raise ValueError(f"Data path does not exist: {split_path}")
+            raise ValueError(f"数据路径不存在: {split_path}")
 
-        # 匹配特征文件: *d_pc_clipped.npy
-        feature_files = glob.glob(os.path.join(split_path, "*_d_pc_clipped.npy"))
+        # 1. 匹配特征文件: 直接匹配 pointclouds 下的所有 .npy 文件
+        # 使用 os.path.join 保证路径拼接的跨平台兼容性
+        feature_files = glob.glob(os.path.join(split_path, "pointclouds", "*.npy"))
         data_list = []
 
         for feat_path in feature_files:
             filename = os.path.basename(feat_path)
-            # 解析文件名: dev_2_005J_20251102_110034_430_d_pc_clipped.npy
-            # parts: ['dev', '2', '005J', '20251102', '110034', '430', ...]
-            parts = filename.split('_')
             
-            # 提取时间戳 (根据你的示例是第3,4,5个部分)
-            # 请根据实际文件名调整这里的索引
-            try:
-                timestamp = f"{parts[3]}_{parts[4]}_{parts[5]}"
-            except IndexError:
-                print(f"Skipping invalid filename: {filename}")
-                continue
+            # 2. 解析文件名: 例如 20260329_105410_942.npy
+            # 因为我们之前保存的名字就是纯时间戳，直接去掉后缀即可，不需要复杂的 split
+            timestamp = os.path.splitext(filename)[0]
             
-            label_filename = f"关键点坐标_{timestamp}.npy"
-            label_path = os.path.join(split_path, label_filename)
+            # 3. 拼接标签路径: 指向 keypoints 文件夹
+            # 对应的标签文件命名为: 时间戳_关键点坐标.npy
+            label_filename = f"{timestamp}_关键点坐标.npy"
+            label_path = os.path.join(split_path, "keypoints", label_filename)
 
+            # 4. 验证特征文件和标签文件是否成对存在
             if os.path.exists(label_path):
                 data_list.append({
                     "feat_path": feat_path,
                     "label_path": label_path,
-                    "name": filename
+                    "name": timestamp  # 直接用时间戳作为该样本的名称标识
                 })
+            else:
+                # 方便排查是否有数据丢失
+                print(f"⚠️ 警告: 找不到特征文件对应的标签 -> {label_filename}")
         
         return data_list
 
@@ -69,6 +69,13 @@ class KeypointDataset(Dataset):
         return len(self.data_list) * self.loop
 
     def __getitem__(self, idx):
+        """
+        代码作用：获取单个数据样本，并在遇到损坏/残缺数据时自动重采样。
+        
+        修改点说明：
+        在加载完 target (标签) 之后，立即检查其维度 `target.shape[0]`。
+        如果不是 6，则打印警告，并递归调用自身获取一个随机的新样本，防止脏数据流入后续的 Batch 拼接环节导致崩溃。
+        """
         idx = idx % len(self.data_list)
         info = self.data_list[idx]
         
@@ -78,12 +85,22 @@ class KeypointDataset(Dataset):
         feat = raw_data[:, 3:]
         target = np.load(info["label_path"]).astype(np.float32)
 
+        # ================= [新增] 形状异常数据防御机制 =================
+        # 检查关键点数量是否严格等于 6
+        if target.shape[0] != 6:
+            print(f"⚠️ 警告: 样本 {info['name']} 的关键点数量异常 (当前为 {target.shape[0]})，已自动跳过！")
+            # 随机生成一个新的索引来顶替当前这个坏样本
+            # 注意：因为上面已经 import numpy as np，这里直接用 np.random.randint 即可
+            new_idx = np.random.randint(0, len(self.data_list))
+            return self.__getitem__(new_idx)
+        # ===============================================================
+
         # 提取给 Swin3D 做位置编码辅助的特征 (coord_feat)
         # Swin3D 需要这个键。既然没有 RGB，就用 "法向量" (第3,4,5列) 代替
         # 维度: (N, 3)
         coord_feat = raw_data[:, 3:6]
 
-        # ================= [新增] 数据安全检查 =================
+        # ================= 数据安全检查 =================
         # 检查是否有 NaN 或 Inf
         if np.isnan(coord).any() or np.isinf(coord).any():
             print(f"⚠️ Warning: Found NaN/Inf in {info['name']}, replacing with 0.")
@@ -108,10 +125,8 @@ class KeypointDataset(Dataset):
             m = 1.0
         
         m = float(m) 
-        # coord = coord / m  <-- 原代码
-        # target = target / m <-- 原代码
         
-        # [修改建议] 防止 m 为 0 (虽然你前面处理了，但双重保险更好)
+        # 防止 m 为 0
         scale = np.array(m, dtype=np.float32) 
         
         coord = coord / scale
@@ -122,10 +137,10 @@ class KeypointDataset(Dataset):
             coord=coord,
             feat=feat,
             target=target, 
-            coord_feat=coord_feat,  # [新增] Swin3D 位置编码辅助特征
+            coord_feat=coord_feat,  
             name=info["name"],
             centroid=centroid, 
-            scale=scale  # [重点] 这里传入 numpy 数组，方便 DataLoader 自动堆叠
+            scale=scale  
         )
 
         # 4. 应用变换 (GridSample 等)

@@ -51,7 +51,7 @@ model = dict(
 # ==============================================================================
 num_worker=4
 batch_size=8
-data_root = "/home/gzh/point/DataSets"
+data_root = "KeyPointDataset_Split"
 grid_size_val = 0.02
 data = dict(
     

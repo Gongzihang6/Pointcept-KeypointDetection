@@ -27,3 +27,5 @@ from .dataloader import MultiDatasetDataloader
 from .keypoint_dataset import KeypointDataset
 
 from .pigseg import PigDataset
+
+from .weight_dataset import PigWeightDataset

@@ -89,6 +89,10 @@ python tools/train.py --config-file configs/pigseg/semseg-spunet-v1m1-0-base.py
 python tools/train.py --config-file configs/pigseg/semseg-ptv3-v1m1-0-base.py
 # 恢复训练
 python tools/train.py --config-file configs/pigseg/semseg-ptv3-v1m1-0-base.py --options resume=True weight=exp/PTV3_PigSeg/model/model_last.pth
+
+
+## 基于PointTransformerV3的体尺体重回归模型训练
+python tools/train.py --config-file configs/my_dataset/ptv3_weight.py
 """
 if __name__ == "__main__":
     main()
