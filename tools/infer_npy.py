@@ -133,7 +133,7 @@ def main():
         
         # 【关键】自定义阈值！原本是 0.5，现在降低到 0.2。
         # 意思是：只要模型认为有 20% 的可能是一头猪，我们就宁杀错不放过，把它判为猪！
-        threshold = 0.05
+        threshold = 0.5
         preds = (pig_probs > threshold).int().cpu().numpy()
 
     # =========================================================================
@@ -176,7 +176,7 @@ def main():
     print("=====================================================")
 
 """
-python tools/infer_npy.py --npy-file body_npy_output/train/20260329_113311_580.npy
+python tools/infer_npy.py --npy-file body_npy_output/train/20260329_105410_942.npy
 """
 if __name__ == "__main__":
     main()

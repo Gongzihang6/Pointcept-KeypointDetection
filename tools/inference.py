@@ -26,13 +26,13 @@ from pointcept.models import build_model
 from pointcept.datasets import build_dataset, point_collate_fn
 from pointcept.utils.misc import intersection_and_union, make_dirs
 from pointcept.engines.defaults import default_argument_parser
-
+from torch.utils.data import ConcatDataset
 def get_args():
     parser = argparse.ArgumentParser(description="Pointcept Keypoint Inference")
     parser.add_argument("--config-file", default="configs/my_dataset/keypoint_ptv3.py", help="配置文件路径")
     parser.add_argument("--options", nargs="+", action=DictAction, help="覆盖配置文件的参数")
     parser.add_argument("--weights", default=None, required=True, help="模型权重文件路径 (.pth)")
-    parser.add_argument("--subset", default="val", choices=["train", "val", "test"], help="数据集划分")
+    parser.add_argument("--subset", default="val", choices=["train", "val", "test", "all"], help="数据集划分")
     parser.add_argument("--idx", type=int, default=-1, help="单样本索引。如果为 -1，则进行批量推理")
     
     # 可视化参数
@@ -93,15 +93,15 @@ def visualize_single(coord, pred_kps, target_kps, args, num_kps):
     colors = [cmap(i / (num_kps - 1 if num_kps > 1 else 1))[:3] for i in range(num_kps)]
 
     # 3. 绘制关键点
-    for i in range(num_kps):
+    # for i in range(num_kps):
         # 真实值：圆球 (Sphere)
-        if target_kps is not None:
-            sphere = create_colored_mesh('sphere', target_kps[i], colors[i], args.sphere_radius)
-            geometries.append(sphere)
+        # if target_kps is not None:
+        #     sphere = create_colored_mesh('sphere', target_kps[i], colors[i], args.sphere_radius)
+        #     geometries.append(sphere)
         
         # 预测值：正方体 (Cube)
-        cube = create_colored_mesh('box', pred_kps[i], colors[i], args.cube_size)
-        geometries.append(cube)
+        # cube = create_colored_mesh('box', pred_kps[i], colors[i], args.cube_size)
+        # geometries.append(cube)
 
     # 4. [修改核心] 使用 Visualizer 来控制渲染选项
     vis = o3d.visualization.Visualizer()
@@ -237,7 +237,7 @@ def plot_batch_errors(all_errors, num_kps):
         # 标签设置
         ax.set_title(f'Keypoint {i}', fontsize=12)
         ax.set_xlabel('Sample Index')
-        ax.set_ylabel('Error (m)')
+        ax.set_ylabel('Error (mm)')
         ax.legend(loc='upper right', fontsize=8)
         ax.grid(True, which='both', linestyle='--', alpha=0.7)
 
@@ -327,15 +327,31 @@ def main():
     model = setup_model(cfg, args.weights)
     
     # 3. 构建数据集
-    # 注意：只构建 args.subset 指定的那一部分 (train/val/test)
-    if args.subset not in cfg.data:
-        raise ValueError(f"Subset {args.subset} not found in config.data")
-    
-    dataset_cfg = cfg.data[args.subset]
-    dataset_cfg.data_root = cfg.data_root # 确保 data_root 被正确传递
-    dataset = build_dataset(dataset_cfg)
-    
-    print(f"=> Loaded {len(dataset)} samples from {args.subset} set.")
+    if args.subset == "all":
+        dataset_list = []
+        # 遍历常用的三个数据集划分
+        for split in ["train", "val", "test"]:
+            if split in cfg.data:
+                dataset_cfg = cfg.data[split]
+                dataset_cfg.data_root = cfg.data_root # 确保 data_root 被正确传递
+                dataset_list.append(build_dataset(dataset_cfg))
+        
+        if len(dataset_list) == 0:
+            raise ValueError("No valid dataset configuration found for 'train', 'val', or 'test'.")
+            
+        # 使用 ConcatDataset 合并多个数据集
+        dataset = ConcatDataset(dataset_list)
+        print(f"=> Loaded {len(dataset)} samples from ALL (train+val+test) sets.")
+        
+    else:
+        # 原有逻辑：仅加载单个子集
+        if args.subset not in cfg.data:
+            raise ValueError(f"Subset {args.subset} not found in config.data")
+        
+        dataset_cfg = cfg.data[args.subset]
+        dataset_cfg.data_root = cfg.data_root 
+        dataset = build_dataset(dataset_cfg)
+        print(f"=> Loaded {len(dataset)} samples from {args.subset} set.")
 
     # 4. 执行推理
     if args.idx != -1:
@@ -536,7 +552,7 @@ OVERALL         | 28.86813
 python tools/inference.py \
     --config-file configs/my_dataset/keypoint_ptv3.py \
     --weights exp/keypoint_ptv3_0409/model_best.pth \
-    --subset test \
+    --subset all \
     --idx -1 \
     --visualize \
     --sphere-radius 0.02 \
