@@ -93,6 +93,10 @@ python tools/train.py --config-file configs/pigseg/semseg-ptv3-v1m1-0-base.py --
 
 ## 基于PointTransformerV3的体尺体重回归模型训练
 python tools/train.py --config-file configs/my_dataset/ptv3_weight.py
+
+## 基于PTv3的关键点预测模型训练（使用了新的标签格式，包含偏移量和掩码）
+python tools/train.py --config-file configs/my_dataset/offset_keypoint_ptv3.py
+
 """
 if __name__ == "__main__":
     main()

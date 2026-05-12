@@ -63,8 +63,9 @@ model = dict(
         upcast_softmax=False,
     ),
     criteria=[
-        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
-        dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1)
+        # dict(type="CrossEntropyLoss", loss_weight=1.0, weight=[1.0, 10.0], ignore_index=-1),
+        dict(type="FocalLoss", gamma=2.0, alpha=[0.1, 0.9], loss_weight=1.0, ignore_index=-1),
+        dict(type="LovaszLoss", mode="multiclass", loss_weight=3.0, ignore_index=-1)
     ]
 )
 
@@ -90,7 +91,7 @@ val_pipeline = [
     ),
 ]
 
-# === 训练集流水线 ===
+# === 训练集流水线 （关闭所有数据增强） ===
 train_pipeline = [
     dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
     dict(type="RandomScale", scale=[0.9, 1.1]),

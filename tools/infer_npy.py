@@ -35,8 +35,8 @@ from pointcept.models import build_model
 
 def get_args():
     parser = argparse.ArgumentParser(description="Pig Semantic Segmentation Inference")
-    parser.add_argument("--config-file", default="configs/pigseg/semseg-swin3d-v1m1-0-base.py", help="训练使用的配置文件")
-    parser.add_argument("--weights", default="exp/autodl_weights/swin3d/model_best.pth", help="最佳权重文件路径")
+    parser.add_argument("--config-file", default="configs/pigseg/semseg-ptv3-v1m1-0-base.py", help="训练使用的配置文件")
+    parser.add_argument("--weights", default="exp/PTV3_PigSeg_0511/model/model_best.pth", help="最佳权重文件路径")
     parser.add_argument("--npy-file", required=True, help="需要推理的 .npy 文件绝对或相对路径")
     parser.add_argument("--voxel-size", type=float, default=20.0, help="下采样网格尺寸(mm)")
     return parser.parse_args()
@@ -64,20 +64,32 @@ def load_and_preprocess_data(npy_path, voxel_size=20.0):
     valid_mask = dist < 5000.0
     coord, normal, curvature = coord[valid_mask], normal[valid_mask], curvature[valid_mask]
 
-    # 3. 第 2 道防线：体素预下采样 (20mm)
-    discrete_coords = np.floor(coord / voxel_size).astype(np.int32)
+    # --- 模拟 test_pipeline 第一步: 整体 CenterShift ---
+    x_min, y_min, z_min = coord[:, 0].min(), coord[:, 1].min(), coord[:, 2].min()
+    x_max, y_max, _ = coord[:, 0].max(), coord[:, 1].max(), coord[:, 2].max()
+    shift = np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, z_min], dtype=np.float32)
+    coord -= shift
+
+    # --- 模拟 GridSample 体素化 ---
+    scaled_coord = coord / voxel_size
+    discrete_coords = np.floor(scaled_coord).astype(np.int32)
+    min_discrete = discrete_coords.min(0)
+    # 按 fnv_hash 或 ravel_hash (这里简单按 lexsort) 取 unique，相当于 mode="test" 的一部分
     _, unique_indices = np.unique(discrete_coords, axis=0, return_index=True)
+    
     coord = coord[unique_indices]
     normal = normal[unique_indices]
     curvature = curvature[unique_indices]
 
-    # 4. CenterShift (模拟 train_pipeline 中的中心平移)
-    coord[:, 0] -= coord[:, 0].mean()
-    coord[:, 1] -= coord[:, 1].mean()
-    coord[:, 2] -= coord[:, 2].min()  # Z轴通常平移至最小值
-
-    # 重新计算平移后的 grid_coord
+    # 重新计算过滤后的 grid_coord 并严格扣除最小坐标 (PointTransformerV3 强依赖此步骤！)
     grid_coord = np.floor(coord / voxel_size).astype(np.int32)
+    grid_coord -= grid_coord.min(0)
+
+    # --- 模拟 post_transform: 片段级 CenterShift ---
+    cx_min, cy_min, cz_min = coord[:, 0].min(), coord[:, 1].min(), coord[:, 2].min()
+    cx_max, cy_max, _ = coord[:, 0].max(), coord[:, 1].max(), coord[:, 2].max()
+    cshift = np.array([(cx_min + cx_max) / 2, (cy_min + cy_max) / 2, cz_min], dtype=np.float32)
+    coord -= cshift
 
     # 5. 特征拼接 (模拟 Collect: feat_keys=("normal", "curvature"))
     feat = np.concatenate([normal, curvature], axis=1).astype(np.float32)
@@ -177,6 +189,7 @@ def main():
 
 """
 python tools/infer_npy.py --npy-file body_npy_output/train/20260329_105410_942.npy
+python tools/infer_npy.py --npy-file /autodl-fs/data/body_npy_output/train/20260329_105532_288.npy
 """
 if __name__ == "__main__":
     main()

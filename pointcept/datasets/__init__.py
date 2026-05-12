@@ -29,3 +29,4 @@ from .keypoint_dataset import KeypointDataset
 from .pigseg import PigDataset
 
 from .weight_dataset import PigWeightDataset
+from .offset_keypoint_dataset import OffsetKeypointDataset
