@@ -125,7 +125,7 @@ class OffsetKeypointSwin3D(nn.Module):
 
         if not self.training:
             final_pred = pred.clone()
-            final_pred[..., 3] = torch.sigmoid(mask_logits)
+            final_pred[..., 3] = torch.sigmoid(pred[..., 3])
             result_dict["pred"] = final_pred
 
         return result_dict

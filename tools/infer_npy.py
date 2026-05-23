@@ -188,8 +188,12 @@ def main():
     print("=====================================================")
 
 """
-python tools/infer_npy.py --npy-file body_npy_output/train/20260329_105410_942.npy
-python tools/infer_npy.py --npy-file /autodl-fs/data/body_npy_output/train/20260329_105532_288.npy
+## 基于Swin3D的语义分割推理
+python tools/infer_npy.py \
+    --weights exp/Swin3D_PigSeg_0512/model/model_best.pth \
+    --config-file configs/pigseg/semseg-swin3d-v1m1-0-base.py \
+    --npy-file body_npy_output/train/20260329_105410_942.npy
+
 """
 if __name__ == "__main__":
     main()

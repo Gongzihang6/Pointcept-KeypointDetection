@@ -1,63 +1,59 @@
 """
 ===============================================================================
 代码作用：
-定义 Swin3D 模型在 Pig 二分类数据集上的语义分割训练配置。
+定义 OctFormer 模型在 Pig 二分类数据集上的语义分割训练配置。
 
 功能/实现了什么：
-1. 指定了模型结构（Swin3D），并设置类别数为 2（0和1）。
-2. 配置了输入特征维度为 4（nx, ny, nz, curvature）。
-3. 定义了数据加载路径、Voxelization（体素化下采样）的网格大小。
-4. 定义了优化器（AdamW）和学习率调度器。
+1. 指定 OctFormer 作为语义分割 backbone。
+2. 显式收集 offset、normal 和 curvature，满足 OctFormer 前向所需字段。
+3. 复用与 PTv3 pigseg 相同的 FocalLoss + LovaszLoss 配方和权重比。
 
 怎么实现的：
-利用 Pointcept 的配置系统，将模型参数 (model)、数据流水线 (data)、优化器 (optimizer) 和训练循环 (hooks) 以字典和类的形式声明，框架在运行时会解析该文件实例化相应模块。
+通过 Pointcept 的配置系统，将模型、数据流水线、优化器和学习率调度器全部声明在一个 Python 配置文件中，由训练入口动态实例化。
 ===============================================================================
 """
 
 _base_ = ["../_base_/default_runtime.py"]
 
 # === 核心参数配置 ===
-weight = None  # 预训练权重路径，没有就设为 None
+weight = None
 resume = False
 evaluate = True
 test_only = False
 
-num_classes = 2 # 二分类
-in_channels = 4 # nx, ny, nz, curvature
-# voxel_size 决定了下采样的程度，根据你的猪体型（米为单位），0.01 表示 1cm
-voxel_size = 30 
+num_classes = 2
+in_channels = 4
+voxel_size = 30
 
-save_path = "exp/Swin3D_PigSeg_0512"
+save_path = "exp/OctFormer_PigSeg_0513"
+
 # === 模型配置 ===
 model = dict(
     type="DefaultSegmentor",
     backbone=dict(
-        type="Swin3D-v1m1",
+        type="OctFormer-v1m1",
         in_channels=in_channels,
         num_classes=num_classes,
-        base_grid_size=30,
-        depths=[2, 4, 9, 4, 4],
-        channels=[48, 96, 192, 384, 384],
-        num_heads=[6, 6, 12, 24, 24],
-        window_sizes=[5, 7, 7, 7, 7],
-        quant_size=4,
-        drop_path_rate=0.2,
-        up_k=3,
-        num_layers=5,
-        stem_transformer=True,
-        down_stride=3,
-        upsample="linear_interpolate",
-        knn_down=True,
-        cRSE="XYZ", # 虽然叫RGB，但实际处理的是连续特征
-        fp16_mode=1,
+        fpn_channels=168,
+        channels=(96, 192, 384, 384),
+        num_blocks=(2, 2, 18, 2),
+        num_heads=(6, 12, 24, 24),
+        patch_size=26,
+        stem_down=2,
+        head_up=2,
+        dilation=4,
+        drop_path=0.5,
+        nempty=True,
+        octree_depth=11,
+        octree_full_depth=2,
     ),
     criteria=[
         dict(type="FocalLoss", gamma=2.0, alpha=[0.1, 0.9], loss_weight=1.0, ignore_index=-1),
-        dict(type="LovaszLoss", mode="multiclass", loss_weight=3.0, ignore_index=-1)
-    ]
+        dict(type="LovaszLoss", mode="multiclass", loss_weight=3.0, ignore_index=-1),
+    ],
 )
 
-# === 数据流水线与预处理 ===
+# === 数据根目录 ===
 data_root = "/autodl-fs/data/body_npy_output"
 
 train_pipeline = [
@@ -76,9 +72,8 @@ train_pipeline = [
     dict(type="ToTensor"),
     dict(
         type="Collect",
-        keys=("coord", "grid_coord", "segment"),
+        keys=("coord", "grid_coord", "normal", "segment"),
         feat_keys=("normal", "curvature"),
-        coord_feat_keys=("normal", "curvature"),
         offset_keys_dict=dict(offset="coord"),
     ),
 ]
@@ -100,12 +95,12 @@ val_pipeline = [
     dict(type="ToTensor"),
     dict(
         type="Collect",
-        keys=("coord", "grid_coord", "segment"),
+        keys=("coord", "grid_coord", "normal", "segment"),
         feat_keys=("normal", "curvature"),
-        coord_feat_keys=("normal", "curvature"),
         offset_keys_dict=dict(offset="coord"),
     ),
 ]
+
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
@@ -144,9 +139,8 @@ data = dict(
                 dict(type="ToTensor"),
                 dict(
                     type="Collect",
-                    keys=("coord", "grid_coord", "index"),
+                    keys=("coord", "grid_coord", "normal", "index"),
                     feat_keys=("normal", "curvature"),
-                    coord_feat_keys=("normal", "curvature"),
                     offset_keys_dict=dict(offset="coord"),
                 ),
             ],
@@ -157,7 +151,7 @@ data = dict(
     ),
 )
 
-# === 训练参数 ===
+# === 优化器与调度器 ===
 optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -168,7 +162,6 @@ scheduler = dict(
     final_div_factor=100.0,
 )
 
-# batch_size 取决于你的显存大小和体素化后的点数
 dataset_type = "PigDataset"
 data_loader = dict(
     type=dataset_type,

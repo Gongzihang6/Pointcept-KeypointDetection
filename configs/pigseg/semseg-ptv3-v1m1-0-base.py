@@ -27,9 +27,9 @@ test_only = False
 
 num_classes = 2 # 0:背景, 1:猪
 in_channels = 4 # nx, ny, nz, curvature
-voxel_size = 40 # 20毫米 (0.02米) 体素化下采样
-save_path = "exp/PTV3_PigSeg"
-# === 模型配置 (PTv3) ===
+voxel_size = 30 # 20毫米 (0.02米) 体素化下采样
+save_path = "exp/PTV3_PigSeg_0511"
+
 # === 模型配置 (PTv3) ===
 model = dict(
     type="DefaultSegmentorV2",         # <--- 【关键1】换成专门接盘 PTv3 的 V2 版本！
@@ -70,7 +70,7 @@ model = dict(
 )
 
 # === 数据根目录 ===
-data_root = "/home/gzh/point/Pointcept-KeypointDetection/body_npy_output"
+data_root = "/autodl-fs/data/body_npy_output"
 
 # === 快速验证流水线 (训练时的 val 使用) ===
 val_pipeline = [
@@ -91,12 +91,8 @@ val_pipeline = [
     ),
 ]
 
-# === 训练集流水线 （关闭所有数据增强） ===
+# === 训练集流水线 ===
 train_pipeline = [
-    dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-    dict(type="RandomScale", scale=[0.9, 1.1]),
-    dict(type="RandomFlip", p=0.5),
-    dict(type="RandomJitter", sigma=5.0, clip=20.0),
     # 增强后强制坐标平移归非负
     dict(type="CenterShift", apply_z=True),
     dict(
@@ -188,8 +184,8 @@ data_loader = dict(
     type=dataset_type,
     dataloader=dict(
         train=dict(batch_size=8, num_workers=4, shuffle=True),
-        val=dict(batch_size=1, num_workers=2, shuffle=False),
-        test=dict(batch_size=1, num_workers=2, shuffle=False),
+        val=dict(batch_size=8, num_workers=2, shuffle=False),
+        test=dict(batch_size=8, num_workers=2, shuffle=False),
     ),
 )
 

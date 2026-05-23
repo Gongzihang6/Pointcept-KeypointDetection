@@ -42,3 +42,4 @@ from .concerto import *
 from .pig_regressor import PigBodyRegressor
 from .offset_keypoint_ptv3 import OffsetKeypointPTv3
 from .offset_keypoint_swin3d import OffsetKeypointSwin3D
+from .offset_keypoint_octformer import OffsetKeypointOctFormer

@@ -37,9 +37,11 @@ def get_args():
     
     # 可视化参数
     parser.add_argument("--visualize", action="store_true", help="是否开启 Open3D 可视化 (仅单样本模式有效)")
-    parser.add_argument("--sphere-radius", type=float, default=0.05, help="真实关键点(球)的半径")
-    parser.add_argument("--cube-size", type=float, default=0.08, help="预测关键点(正方体)的边长")
+    parser.add_argument("--sphere-radius", type=float, default=10, help="真实关键点(球)的半径")
+    parser.add_argument("--cube-size", type=float, default=10, help="预测关键点(正方体)的边长")
     parser.add_argument("--point-size", type=float, default=2.0, help="Open3D 可视化时点云的点大小")
+    parser.add_argument("--agg-method", choices=["argmax", "weighted"], default="argmax", help="关键点聚合策略：'argmax'（置信度最高点） 或 'weighted'（置信度大于阈值的点加权平均）")
+    parser.add_argument("--mask-thresh", type=float, default=0.5, help="当 agg-method 为 weighted 时的掩码阈值")
     parser.add_argument("--save-dir", default=None, help="结果保存路径 (可选)")
     
     args = parser.parse_args()
@@ -77,31 +79,53 @@ def create_colored_mesh(geometry_type, center, color, size):
     mesh.paint_uniform_color(color)
     return mesh
 
-def visualize_single(coord, pred_kps, target_kps, args, num_kps):
-    """使用 Open3D 可视化 (支持调整点大小)"""
+def visualize_single(coord, pred_kps, target_kps, args, num_kps, active_points_info=None):
+    """使用 Open3D 可视化 (支持调整点大小，点云特定高亮着色)"""
     print(f"=> Visualizing... (Point Size: {args.point_size})")
     geometries = []
 
-    # 1. 点云 (灰色)
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(coord)
-    pcd.paint_uniform_color([0.7, 0.7, 0.7]) # 灰色点云
-    geometries.append(pcd)
-
-    # 2. 关键点颜色映射
+    # 1. 点云颜色设定
+    point_colors = np.ones((coord.shape[0], 3)) * 0.7  # 默认全局灰色
     cmap = plt.get_cmap("jet")
     colors = [cmap(i / (num_kps - 1 if num_kps > 1 else 1))[:3] for i in range(num_kps)]
 
-    # 3. 绘制关键点
-    # for i in range(num_kps):
+    # 着色参与预测的关键点区域
+    if active_points_info is not None:
+        for k, info in active_points_info.items():
+            idx = info['indices']
+            probs = info['probs']
+            if len(idx) > 0:
+                base_color = np.array(colors[k])
+                probs_arr = np.array(probs)
+                # 使用置信度概率来调节颜色亮度 (概率越高，颜色越纯/饱和，越低越靠近灰白)
+                # 这会让高置信度的点非常醒目，同时同属一类的点有相同的色相
+                intensities = np.clip(probs_arr, 0, 1.0).reshape(-1, 1)
+                colored_points = base_color * intensities + np.array([0.7, 0.7, 0.7]) * (1 - intensities)
+                point_colors[idx] = colored_points
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(coord)
+    pcd.colors = o3d.utility.Vector3dVector(point_colors)
+    geometries.append(pcd)
+
+    # 3. 绘制关键点（真实值：球；预测值：立方体）
+    for i in range(num_kps):
         # 真实值：圆球 (Sphere)
-        # if target_kps is not None:
-        #     sphere = create_colored_mesh('sphere', target_kps[i], colors[i], args.sphere_radius)
-        #     geometries.append(sphere)
-        
+        try:
+            if target_kps is not None and not np.any(np.isnan(target_kps[i])):
+                sphere = create_colored_mesh('sphere', np.asarray(target_kps[i]), colors[i], args.sphere_radius)
+                geometries.append(sphere)
+        except Exception:
+            # 容错：若 target_kps 不可用则忽略
+            pass
+
         # 预测值：正方体 (Cube)
-        # cube = create_colored_mesh('box', pred_kps[i], colors[i], args.cube_size)
-        # geometries.append(cube)
+        try:
+            if pred_kps is not None and not np.any(np.isnan(pred_kps[i])):
+                cube = create_colored_mesh('box', np.asarray(pred_kps[i]), colors[i], args.cube_size)
+                geometries.append(cube)
+        except Exception:
+            pass
 
     # 4. [修改核心] 使用 Visualizer 来控制渲染选项
     vis = o3d.visualization.Visualizer()
@@ -176,13 +200,37 @@ def inference_single_sample(cfg, model, dataset, args):
     # 逆归一化 coord
     true_coord = coord * scale + centroid
     
+    # 传递参与计算的点索引及其权重以供可视化
+    active_points_info = {}
+
     for k in range(num_kps):
         # ---- 计算预测关键点 ----
         # 获取第 k 个关键点的所有点的置信度
         k_probs = pred_mask[:, k]
-        best_idx_pred = np.argmax(k_probs)
-        # 该点对应的预测世界坐标 = 其自身世界坐标 + 预测的缩放世界偏移
-        pred_kp_coord = true_coord[best_idx_pred] + pred_offset[best_idx_pred, k] * scale
+        
+        if args.agg_method == "argmax":
+            best_idx_pred = np.argmax(k_probs)
+            pred_kp_coord = true_coord[best_idx_pred] + pred_offset[best_idx_pred, k] * scale
+            active_points_info[k] = {'indices': [best_idx_pred], 'probs': [k_probs[best_idx_pred]]}
+        else: # weighted
+            valid_mask = k_probs > args.mask_thresh
+            if np.any(valid_mask):
+                valid_indices_pred = np.where(valid_mask)[0]
+                valid_probs = k_probs[valid_mask]
+                valid_coords = true_coord[valid_mask]
+                valid_offsets = pred_offset[valid_mask, k]
+                # 计算候选点的预测关键点世界坐标
+                candidate_kps = valid_coords + valid_offsets * scale
+                # 通过概率归一化权重
+                weights = valid_probs / np.sum(valid_probs)
+                pred_kp_coord = np.sum(candidate_kps * weights[:, np.newaxis], axis=0)
+                active_points_info[k] = {'indices': valid_indices_pred, 'probs': valid_probs}
+            else:
+                # 降级退回到 argmax
+                best_idx_pred = np.argmax(k_probs)
+                pred_kp_coord = true_coord[best_idx_pred] + pred_offset[best_idx_pred, k] * scale
+                active_points_info[k] = {'indices': [best_idx_pred], 'probs': [k_probs[best_idx_pred]]}
+                
         pred_kps[k] = pred_kp_coord
         
         # ---- 计算真实关键点 ----
@@ -206,7 +254,7 @@ def inference_single_sample(cfg, model, dataset, args):
 
     # 可视化 (需要传真实空间的 coord)
     if args.visualize:
-        visualize_single(true_coord, pred_kps, target_kps, args, num_kps)
+        visualize_single(true_coord, pred_kps, target_kps, args, num_kps, active_points_info)
 
 def plot_batch_errors(all_errors, num_kps):
     """
@@ -335,8 +383,23 @@ def inference_batch(cfg, model, dataset, args):
                     if len(k_probs) == 0:
                         continue
                         
-                    best_idx_pred = torch.argmax(k_probs)
-                    pred_kp_coord = s_true_coord[best_idx_pred] + s_pred_off[best_idx_pred, k] * s_scale
+                    if args.agg_method == "argmax":
+                        best_idx_pred = torch.argmax(k_probs)
+                        pred_kp_coord = s_true_coord[best_idx_pred] + s_pred_off[best_idx_pred, k] * s_scale
+                    else: # weighted
+                        valid_mask = k_probs > args.mask_thresh
+                        if torch.any(valid_mask):
+                            valid_probs = k_probs[valid_mask]
+                            valid_coords = s_true_coord[valid_mask]
+                            valid_offsets = s_pred_off[valid_mask, k]
+                            
+                            candidate_kps = valid_coords + valid_offsets * s_scale
+                            weights = valid_probs / torch.sum(valid_probs)
+                            pred_kp_coord = torch.sum(candidate_kps * weights.unsqueeze(1), dim=0)
+                        else:
+                            best_idx_pred = torch.argmax(k_probs)
+                            pred_kp_coord = s_true_coord[best_idx_pred] + s_pred_off[best_idx_pred, k] * s_scale
+                            
                     pred_kps_batch[b_idx, k] = pred_kp_coord
                     
                     valid_indices = torch.where(s_target_mask[:, k] > 0.5)[0]
@@ -426,9 +489,21 @@ def main():
 python tools/infer_offset.py \
     --config-file configs/my_dataset/offset_keypoint_ptv3.py \
     --weights exp/offset_keypoint_ptv3_0512/model/model_best.pth \
-    --subset train \
-    --idx -1 \
+    --subset all \
+    --idx 1 \
     --visualize
+python tools/infer_offset.py \
+    --config-file configs/my_dataset/offset_keypoint_ptv3.py \
+    --weights exp/offset_keypoint_ptv3_0512/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --agg-method weighted \
+    --mask-thresh 0.8 
+#全样本误差 24.47934
+#训练集误差 13.83127
+#验证集误差 50.20841
+#测试集误差 48.25328
 ### 全样本推理
 ====== Batch Inference Statistics ======
 Total Samples: 152
@@ -495,9 +570,26 @@ OVERALL         | 48.75685
 python tools/infer_offset.py \
     --config-file configs/my_dataset/offset_keypoint_swin3d.py \
     --weights exp/offset_keypoint_swin3d_0512/model/model_best.pth \
-    --subset test \
+    --subset all \
     --idx -1 \
-    --visualize
+    --visualize \
+    --agg-method weighted \
+    --mask-thresh 0.8
+### 全样本推理
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 57.87032            | 33.15565
+KP 1            | 37.99462            | 26.44286
+KP 2            | 41.14744            | 32.10968
+KP 3            | 40.26004            | 25.71033
+KP 4            | 45.39358            | 26.83938
+KP 5            | 40.85643            | 22.84280
+-----------------------------------------------------------------
+OVERALL         | 43.92041
+-----------------------------------------------------------------
 ### 训练集推理
 ====== Batch Inference Statistics ======
 Total Samples: 106
@@ -542,6 +634,45 @@ KP 4            | 59.30550            | 28.79784
 KP 5            | 40.57346            | 18.18356
 -----------------------------------------------------------------
 OVERALL         | 56.41934
+-----------------------------------------------------------------
+
+## 基于OctFormer模型的推理示例
+python tools/infer_offset.py \
+    --config-file configs/my_dataset/offset_keypoint_octformer.py \
+    --weights exp/offset_keypoint_octformer_0512/model/model_best.pth \
+    --subset train \
+    --idx 25 \
+    --visualize \
+    --agg-method weighted \
+    --mask-thresh 0.8
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 14.72275            | 20.08362
+KP 1            | 24.54355            | 28.27561
+KP 2            | 26.55748            | 33.80216
+KP 3            | 20.92421            | 23.73089
+KP 4            | 20.50109            | 24.36789
+KP 5            | 22.45653            | 17.22614
+-----------------------------------------------------------------
+OVERALL         | 21.61760
+-----------------------------------------------------------------
+### 训练集推理
+====== Batch Inference Statistics ======
+Total Samples: 106
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 4.90193            | 2.22768
+KP 1            | 10.18732            | 5.54086
+KP 2            | 10.16163            | 3.90413
+KP 3            | 9.77647            | 4.62208
+KP 4            | 7.93249            | 3.73575
+KP 5            | 14.24255            | 7.28289
+-----------------------------------------------------------------
+OVERALL         | 9.53373
 -----------------------------------------------------------------
 """
 if __name__ == "__main__":
