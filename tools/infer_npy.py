@@ -32,81 +32,99 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../"
 
 from pointcept.utils.config import Config
 from pointcept.models import build_model
+from tools.pigseg_shared import build_input_dict, parse_npy_file, preprocess_like_infer_npy
+
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+    value = value.lower()
+    if value in {"true", "1", "yes", "y"}:
+        return True
+    if value in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError("Boolean value expected, use true/false.")
 
 def get_args():
     parser = argparse.ArgumentParser(description="Pig Semantic Segmentation Inference")
     parser.add_argument("--config-file", default="configs/pigseg/semseg-ptv3-v1m1-0-base.py", help="训练使用的配置文件")
     parser.add_argument("--weights", default="exp/PTV3_PigSeg_0511/model/model_best.pth", help="最佳权重文件路径")
     parser.add_argument("--npy-file", required=True, help="需要推理的 .npy 文件绝对或相对路径")
-    parser.add_argument("--voxel-size", type=float, default=20.0, help="下采样网格尺寸(mm)")
+    parser.add_argument("--voxel-size", type=float, default=None, help="体素尺寸；默认跟随配置文件中的 voxel_size")
+    parser.add_argument("--max-nn", type=int, default=30, help="当输入只有 xyz 时，估计法向量/曲率使用的 KNN")
+    parser.add_argument("--outlier-distance", type=float, default=5000.0, help="飞点过滤阈值，单位与输入坐标一致")
+    parser.add_argument("--pig-label", type=int, default=1, help="猪类别标签编号")
+    parser.add_argument(
+        "--pig-prob-thresh",
+        type=float,
+        default=-1.0,
+        help="默认使用 argmax；若设为 >=0，则按猪类别概率阈值二值化",
+    )
+    parser.add_argument(
+        "--save-point-clouds",
+        type=str2bool,
+        default=True,
+        help="是否将完整点云和猪主体点云保存到本地(true/false)",
+    )
+    parser.add_argument(
+        "--visualize",
+        type=str2bool,
+        default=False,
+        help="是否弹出Open3D窗口可视化分割结果(true/false)",
+    )
     return parser.parse_args()
 
-def load_and_preprocess_data(npy_path, voxel_size=20.0):
-    """手动模拟 PigDataset 和 Pipeline 的预处理过程，确保输入特征与训练时一模一样"""
-    print(f"=> Loading data from: {npy_path}")
-    data = np.load(npy_path)
-    
-    coord = data[:, 0:3].astype(np.float32)
-    normal = data[:, 3:6].astype(np.float32)
-    curvature = data[:, 6:7].astype(np.float32)
+def resolve_voxel_size(cfg, cli_value):
+    if cli_value is not None:
+        return float(cli_value)
+    if hasattr(cfg, "voxel_size"):
+        return float(cfg.voxel_size)
+    if hasattr(cfg, "data") and "test" in cfg.data and "test_cfg" in cfg.data.test:
+        return float(cfg.data.test.test_cfg.voxelize.grid_size)
+    raise ValueError("无法从配置文件解析 voxel_size，请显式传入 --voxel-size")
 
-    # 1. 第 0 道防线：致命 NaN 清洗
-    valid_nan = ~(np.isnan(normal).any(axis=1) | np.isnan(curvature).any(axis=1) | np.isnan(coord).any(axis=1))
-    coord, normal, curvature = coord[valid_nan], normal[valid_nan], curvature[valid_nan]
+def build_colored_point_cloud(coord, preds):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(coord)
 
-    if coord.shape[0] == 0:
-        raise ValueError("Data is empty after NaN filtering!")
+    colors = np.zeros_like(coord, dtype=np.float64)
+    colors[preds == 0] = [1.0, 0.0, 0.0]  # 背景红
+    colors[preds == 1] = [0.0, 0.0, 1.0]  # 猪主体蓝
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+    return pcd
 
-    # 2. 第 1 道防线：过滤极远飞点 (截断 5000mm)
-    median_coord = np.median(coord, axis=0)
-    coord = coord - median_coord
-    dist = np.linalg.norm(coord, axis=1)
-    valid_mask = dist < 5000.0
-    coord, normal, curvature = coord[valid_mask], normal[valid_mask], curvature[valid_mask]
+def save_prediction_outputs(npy_file, original_coord, preds):
+    print("=> Saving predicted point clouds...")
 
-    # --- 模拟 test_pipeline 第一步: 整体 CenterShift ---
-    x_min, y_min, z_min = coord[:, 0].min(), coord[:, 1].min(), coord[:, 2].min()
-    x_max, y_max, _ = coord[:, 0].max(), coord[:, 1].max(), coord[:, 2].max()
-    shift = np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, z_min], dtype=np.float32)
-    coord -= shift
+    pcd_full = build_colored_point_cloud(original_coord, preds)
+    output_full_path = npy_file.replace(".npy", "_pred_full.ply")
+    o3d.io.write_point_cloud(output_full_path, pcd_full)
+    print(f"  -> 完整场景已保存: {output_full_path}")
 
-    # --- 模拟 GridSample 体素化 ---
-    scaled_coord = coord / voxel_size
-    discrete_coords = np.floor(scaled_coord).astype(np.int32)
-    min_discrete = discrete_coords.min(0)
-    # 按 fnv_hash 或 ravel_hash (这里简单按 lexsort) 取 unique，相当于 mode="test" 的一部分
-    _, unique_indices = np.unique(discrete_coords, axis=0, return_index=True)
-    
-    coord = coord[unique_indices]
-    normal = normal[unique_indices]
-    curvature = curvature[unique_indices]
+    pig_mask = preds == 1
+    pig_coords = original_coord[pig_mask]
+    if len(pig_coords) > 0:
+        pcd_pig = o3d.geometry.PointCloud()
+        pcd_pig.points = o3d.utility.Vector3dVector(pig_coords)
+        pcd_pig.paint_uniform_color([0.0, 0.0, 1.0])
 
-    # 重新计算过滤后的 grid_coord 并严格扣除最小坐标 (PointTransformerV3 强依赖此步骤！)
-    grid_coord = np.floor(coord / voxel_size).astype(np.int32)
-    grid_coord -= grid_coord.min(0)
+        output_pig_path = npy_file.replace(".npy", "_pig_only.ply")
+        o3d.io.write_point_cloud(output_pig_path, pcd_pig)
+        print(f"  -> 猪主体点云已提取并保存: {output_pig_path} (共 {len(pig_coords)} 个点)")
+    else:
+        print("  -> [警告] 模型没有在当前场景中预测出任何猪主体(Label=1)的点，跳过保存猪主体点云。")
 
-    # --- 模拟 post_transform: 片段级 CenterShift ---
-    cx_min, cy_min, cz_min = coord[:, 0].min(), coord[:, 1].min(), coord[:, 2].min()
-    cx_max, cy_max, _ = coord[:, 0].max(), coord[:, 1].max(), coord[:, 2].max()
-    cshift = np.array([(cx_min + cx_max) / 2, (cy_min + cy_max) / 2, cz_min], dtype=np.float32)
-    coord -= cshift
-
-    # 5. 特征拼接 (模拟 Collect: feat_keys=("normal", "curvature"))
-    feat = np.concatenate([normal, curvature], axis=1).astype(np.float32)
-
-    # 6. 构造模型所需的输入字典
-    num_points = coord.shape[0]
-    data_dict = {
-        "coord": torch.tensor(coord).cuda(),
-        "grid_coord": torch.tensor(grid_coord).cuda(),
-        "feat": torch.tensor(feat).cuda(),
-        "coord_feat": torch.tensor(feat).cuda(),
-        "offset": torch.tensor([num_points], dtype=torch.int32).cuda(),
-        "batch": torch.zeros(num_points, dtype=torch.long).cuda()
-    }
-    
-    print(f"=> Preprocessing finished. Points after voxelization: {num_points}")
-    return data_dict, coord
+def visualize_prediction(original_coord, preds):
+    print("=> Visualizing segmentation result...")
+    pcd_vis = build_colored_point_cloud(original_coord, preds)
+    try:
+        o3d.visualization.draw_geometries(
+            [pcd_vis],
+            window_name="Pig Segmentation Result",
+            width=1280,
+            height=720,
+        )
+    except Exception as exc:
+        print(f"  -> [警告] 可视化失败，当前环境可能不支持图形界面: {exc}")
 
 def main():
     args = get_args()
@@ -114,6 +132,7 @@ def main():
     # 1. 初始化模型
     print(f"=> Loading config: {args.config_file}")
     cfg = Config.fromfile(args.config_file)
+    voxel_size = resolve_voxel_size(cfg, args.voxel_size)
     model = build_model(cfg.model)
     
     print(f"=> Loading weights: {args.weights}")
@@ -126,7 +145,31 @@ def main():
     model.eval()
 
     # 2. 数据读取与处理
-    data_dict, original_coord = load_and_preprocess_data(args.npy_file, args.voxel_size)
+    print(f"=> Loading data from: {args.npy_file}")
+    point_cloud_data = parse_npy_file(args.npy_file)
+    processed, preprocess_meta = preprocess_like_infer_npy(
+        point_cloud_data=point_cloud_data,
+        max_nn=args.max_nn,
+        outlier_distance=args.outlier_distance,
+        voxel_size=voxel_size,
+    )
+    data_dict = build_input_dict(
+        coord=processed["coord"],
+        feat=processed["feat"],
+        grid_coord=processed["grid_coord"],
+        device=torch.device("cuda"),
+    )
+    original_coord = processed["return_coord"]
+    print(
+        "=> Preprocessing finished. "
+        f"source_points={preprocess_meta['source_points']} "
+        f"valid_input_points={preprocess_meta['valid_input_points']} "
+        f"feature_valid_points={preprocess_meta['feature_valid_points']} "
+        f"valid_points={preprocess_meta['valid_points']} "
+        f"voxel_points={preprocess_meta['voxel_points']} "
+        f"feature_source={preprocess_meta['feature_source']} "
+        f"voxel_size={voxel_size}"
+    )
 
     # 3. 执行推理
     print("=> Running inference...")
@@ -137,62 +180,48 @@ def main():
         else:
             logits = output
             
-        # 将 logits 转换为 0~1 的概率分布
         probs = torch.softmax(logits, dim=1) 
-        
-        # 提取模型认为是猪(类别 1)的概率
-        pig_probs = probs[:, 1]
-        
-        # 【关键】自定义阈值！原本是 0.5，现在降低到 0.2。
-        # 意思是：只要模型认为有 20% 的可能是一头猪，我们就宁杀错不放过，把它判为猪！
-        threshold = 0.5
-        preds = (pig_probs > threshold).int().cpu().numpy()
+        pig_probs = probs[:, args.pig_label]
 
-    # =========================================================================
-    # 4. 保存文件阶段 (适配无头服务器，不直接弹窗)
-    # =========================================================================
-    
-    # --- 任务 A: 保存完整的红蓝上色点云 ---
-    print("=> Saving full colored point cloud...")
-    pcd_full = o3d.geometry.PointCloud()
-    pcd_full.points = o3d.utility.Vector3dVector(original_coord)
+        if args.pig_prob_thresh >= 0.0:
+            preds = (pig_probs > args.pig_prob_thresh).int().cpu().numpy()
+            print(f"=> Prediction mode: threshold, pig_prob_thresh={args.pig_prob_thresh}")
+        else:
+            preds = torch.argmax(logits, dim=1).cpu().numpy()
+            print("=> Prediction mode: argmax")
+        pig_positive = int((preds == args.pig_label).sum())
+        print(
+            "=> Prediction stats: "
+            f"pig_prob_min={float(pig_probs.min().item()):.6f} "
+            f"pig_prob_mean={float(pig_probs.mean().item()):.6f} "
+            f"pig_prob_max={float(pig_probs.max().item()):.6f} "
+            f"pig_positive={pig_positive} "
+            f"total_points={int(preds.shape[0])}"
+        )
 
-    colors = np.zeros_like(original_coord)
-    colors[preds == 0] = [1.0, 0.0, 0.0] # 背景红
-    colors[preds == 1] = [0.0, 0.0, 1.0] # 猪主体蓝
-    pcd_full.colors = o3d.utility.Vector3dVector(colors)
-
-    output_full_path = args.npy_file.replace('.npy', '_pred_full.ply')
-    o3d.io.write_point_cloud(output_full_path, pcd_full)
-    print(f"  -> 完整场景已保存: {output_full_path}")
-
-    # --- 任务 B: 仅保留并保存猪主体(标签为1)的点云 ---
-    print("=> Extracting and saving Pig-only point cloud...")
-    pig_mask = (preds == 1)
-    pig_coords = original_coord[pig_mask]
-
-    if len(pig_coords) > 0:
-        pcd_pig = o3d.geometry.PointCloud()
-        pcd_pig.points = o3d.utility.Vector3dVector(pig_coords)
-        # 将提取出的猪统一涂成蓝色，或者你也可以不涂色保留原始坐标
-        pcd_pig.paint_uniform_color([0.0, 0.0, 1.0])
-        
-        output_pig_path = args.npy_file.replace('.npy', '_pig_only.ply')
-        o3d.io.write_point_cloud(output_pig_path, pcd_pig)
-        print(f"  -> 猪主体点云已提取并保存: {output_pig_path} (共 {len(pig_coords)} 个点)")
+    if args.save_point_clouds:
+        save_prediction_outputs(args.npy_file, original_coord, preds)
+        print("\n=====================================================")
+        print(" 推理与提取完成！请将 .ply 文件下载到本地查看。")
+        print("=====================================================")
     else:
-        print("  -> [警告] 模型没有在当前场景中预测出任何猪主体(Label=1)的点！")
+        print("=> Skip saving point clouds because --save-point-clouds=false")
 
-    print("\n=====================================================")
-    print(" 推理与提取完成！请将 .ply 文件下载到本地查看。")
-    print("=====================================================")
+    if args.visualize:
+        visualize_prediction(original_coord, preds)
+    else:
+        print("=> Skip visualization because --visualize=false")
+
+
 
 """
 ## 基于Swin3D的语义分割推理
 python tools/infer_npy.py \
     --weights exp/Swin3D_PigSeg_0512/model/model_best.pth \
     --config-file configs/pigseg/semseg-swin3d-v1m1-0-base.py \
-    --npy-file body_npy_output/train/20260329_105410_942.npy
+    --npy-file body_npy_output/train/20260329_105410_942.npy \
+    --save-point-clouds true \
+    --visualize false
 
 """
 if __name__ == "__main__":

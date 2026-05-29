@@ -23,3 +23,4 @@ outputs/
 */.DS_Store
 **/*.out
 Dockerfile
+debug_qt_inputs/

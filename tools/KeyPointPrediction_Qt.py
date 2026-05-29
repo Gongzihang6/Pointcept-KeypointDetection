@@ -27,7 +27,7 @@ def load_model():
     
     # 1. 加载你训练该模型时所对应的配置文件
     # 训练脚本通常会在 exp/keypoint_swin3d/ 目录下保存一份 config.py 或 config.yaml
-    config_path = "exp/keypoint_swin3d/config.py" 
+    config_path = "configs/pigseg/semseg-swin3d-v1m1-0-base.py" 
     cfg = Config.fromfile(config_path)
     
     # 2. 根据配置文件自动实例化正确的模型 (这样无论你训练的是 Swin3D 还是 PTv3，都能自动对应)
@@ -35,7 +35,7 @@ def load_model():
     
     # 3. 加载权重文件
     # 增加 weights_only=False 消除 FutureWarning，或者在确认安全的情况下设为 True
-    checkpoint_path = "exp/keypoint_swin3d/model/model_best.pth"
+    checkpoint_path = "exp/Swin3D_PigSeg_0512/model/model_best.pth"
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     
     # 4. 注入权重

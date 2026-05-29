@@ -52,6 +52,7 @@ model = dict(
         fp16_mode=1,
     ),
     criteria=[
+        # dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1,weight=[0.1, 0.9]),
         dict(type="FocalLoss", gamma=2.0, alpha=[0.1, 0.9], loss_weight=1.0, ignore_index=-1),
         dict(type="LovaszLoss", mode="multiclass", loss_weight=3.0, ignore_index=-1)
     ]
