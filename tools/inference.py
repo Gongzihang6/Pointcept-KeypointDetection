@@ -14,6 +14,7 @@ import torch
 import open3d as o3d
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from datetime import datetime
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -41,6 +42,8 @@ def get_args():
     parser.add_argument("--cube-size", type=float, default=0.08, help="预测关键点(正方体)的边长")
     parser.add_argument("--point-size", type=float, default=2.0, help="Open3D 可视化时点云的点大小")
     parser.add_argument("--save-dir", default=None, help="结果保存路径 (可选)")
+    parser.add_argument("--save-keypoints", action="store_true", help="是否保存预测关键点和真实关键点坐标")
+    parser.add_argument("--save-name", default=None, help="保存坐标的 txt 文件名；默认自动生成")
     
     args = parser.parse_args()
     return args
@@ -63,6 +66,72 @@ def setup_model(cfg, weights_path):
     model.cuda()
     model.eval()
     return model
+
+def get_sample_names(data_dict, start_idx, batch_size):
+    """从 batch 中提取样本名，失败时回退到 sample_序号。"""
+    names = data_dict.get("name", None)
+    fallback = [f"sample_{start_idx + i}" for i in range(batch_size)]
+    if names is None:
+        return fallback
+    if isinstance(names, np.ndarray):
+        names = names.tolist()
+    if isinstance(names, torch.Tensor):
+        names = names.detach().cpu().tolist()
+    if isinstance(names, (list, tuple)):
+        names = [str(name) for name in names]
+        if len(names) == batch_size:
+            return names
+        return names + fallback[len(names):]
+    if batch_size == 1:
+        return [str(names)]
+    return fallback
+
+def sanitize_filename(name):
+    keep = []
+    for ch in str(name):
+        keep.append(ch if ch.isalnum() or ch in ("-", "_", ".") else "_")
+    return "".join(keep).strip("_") or "keypoints"
+
+def build_keypoint_save_path(args, cfg, mode):
+    if not args.save_keypoints:
+        return None
+    if args.save_dir is None:
+        raise ValueError("--save-keypoints requires --save-dir to specify the output directory.")
+    os.makedirs(args.save_dir, exist_ok=True)
+    if args.save_name:
+        filename = args.save_name
+    else:
+        model_name = sanitize_filename(cfg.model.type)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{model_name}_{args.subset}_{mode}_{timestamp}_keypoints.txt"
+    if not filename.endswith(".txt"):
+        filename += ".txt"
+    return os.path.join(args.save_dir, sanitize_filename(filename))
+
+def save_keypoint_records(records, save_path, args, cfg, prediction_type):
+    if save_path is None:
+        return
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write("# Keypoint prediction export\n")
+        f.write(f"# prediction_type={prediction_type}\n")
+        f.write(f"# config_file={args.config_file}\n")
+        f.write(f"# weights={args.weights}\n")
+        f.write(f"# subset={args.subset}\n")
+        f.write(f"# model_type={cfg.model.type}\n")
+        f.write("# columns are tab-separated\n")
+        f.write("sample_index\tsample_id\tkeypoint_id\tpred_x\tpred_y\tpred_z\tgt_x\tgt_y\tgt_z\terror\n")
+        for record in records:
+            pred = np.asarray(record["pred"], dtype=np.float64)
+            target = np.asarray(record["target"], dtype=np.float64)
+            errors = np.linalg.norm(pred - target, axis=-1)
+            for kp_idx, (pred_xyz, target_xyz, error) in enumerate(zip(pred, target, errors)):
+                f.write(
+                    f"{record['sample_index']}\t{record['sample_id']}\t{kp_idx}\t"
+                    f"{pred_xyz[0]:.8f}\t{pred_xyz[1]:.8f}\t{pred_xyz[2]:.8f}\t"
+                    f"{target_xyz[0]:.8f}\t{target_xyz[1]:.8f}\t{target_xyz[2]:.8f}\t"
+                    f"{error:.8f}\n"
+                )
+    print(f"=> Saved keypoint predictions and GT to: {save_path}")
 
 def create_colored_mesh(geometry_type, center, color, size):
     """创建带颜色的几何体 (球或立方体)"""
@@ -164,6 +233,12 @@ def inference_single_sample(cfg, model, dataset, args):
         # 如果没有 scale 只有 grid_size，且 target 是体素坐标，则用 grid_size
         scale = data_dict["grid_size"]
         if isinstance(scale, torch.Tensor): scale = scale.item()
+    centroid = np.zeros(3, dtype=np.float32)
+    if "centroid" in data_dict:
+        centroid = data_dict["centroid"].cpu().numpy()[0]
+
+    pred_world = pred * scale + centroid
+    target_world = target * scale + centroid if target is not None else np.full_like(pred_world, np.nan)
 
     print(f"\n====== Inference Result [Sample IDX: {idx}] ======")
     print(f"Scale Factor: {scale}")
@@ -185,6 +260,17 @@ def inference_single_sample(cfg, model, dataset, args):
         print(f"Mean Error      | {np.mean(real_diff):.4f}")
         print("-" * 40)
     
+    if args.save_keypoints:
+        sample_name = get_sample_names(data_dict, idx, 1)[0]
+        save_path = build_keypoint_save_path(args, cfg, "single")
+        save_keypoint_records(
+            [dict(sample_index=idx, sample_id=sample_name, pred=pred_world, target=target_world)],
+            save_path,
+            args,
+            cfg,
+            prediction_type="direct",
+        )
+
     # 5. 可视化
     if args.visualize:
         # 坐标通常也需要缩放以便可视化正确（如果 coord 也是归一化的）
@@ -199,6 +285,10 @@ def plot_batch_errors(all_errors, num_kps):
     layout: 2行3列 (针对6个关键点)
     """
     import matplotlib.pyplot as plt
+
+    # 可视化前随机打乱样本顺序，避免原始数据顺序影响散点分布观感。
+    # if all_errors.shape[0] > 1:
+    #     all_errors = all_errors[np.random.permutation(all_errors.shape[0])]
     
     # 设置绘图风格
     plt.style.use('ggplot')
@@ -211,7 +301,7 @@ def plot_batch_errors(all_errors, num_kps):
     # 展平 axes 方便索引
     axes = axes.flatten()
     
-    # 样本序号 (X轴)
+    # 打乱后的样本序号 (X轴)
     x = np.arange(all_errors.shape[0])
     
     for i in range(num_kps):
@@ -236,7 +326,7 @@ def plot_batch_errors(all_errors, num_kps):
         
         # 标签设置
         ax.set_title(f'Keypoint {i}', fontsize=12)
-        ax.set_xlabel('Sample Index')
+        ax.set_xlabel('Shuffled Sample Index')
         ax.set_ylabel('Error (mm)')
         ax.legend(loc='upper right', fontsize=8)
         ax.grid(True, which='both', linestyle='--', alpha=0.7)
@@ -258,6 +348,8 @@ def inference_batch(cfg, model, dataset, args):
 
     num_kps = cfg.model.num_keypoints
     all_errors = [] # 存储所有样本所有关键点的误差
+    keypoint_records = []
+    sample_cursor = 0
 
     model.eval()
     with torch.no_grad():
@@ -276,19 +368,55 @@ def inference_batch(cfg, model, dataset, args):
             # Reshape (B, K, 3)
             pred = pred.view(-1, num_kps, 3)
             target = target.view(-1, num_kps, 3)
+            batch_size = pred.shape[0]
             
             # Calc Distance in Normalized Space
             dist = torch.norm(pred - target, p=2, dim=-1) # (B, K)
             
             # Inverse Normalization
+            scale_tensor = torch.ones((batch_size, 1, 1), dtype=pred.dtype, device=pred.device)
+            scale_factor = torch.ones((batch_size, 1), dtype=pred.dtype, device=pred.device)
             if "scale" in data_dict:
                 scale = data_dict["scale"] # (B,)
-                if scale.ndim == 1: scale = scale.view(-1, 1)
-                dist = dist * scale
+                if scale.ndim == 0:
+                    scale = scale.view(1).repeat(batch_size)
+                scale_factor = scale.view(-1, 1)
+                scale_tensor = scale.view(-1, 1, 1)
+                dist = dist * scale_factor
             elif "grid_size" in data_dict:
                 # Fallback logic
                 g = data_dict["grid_size"]
-                dist = dist * g
+                if not torch.is_tensor(g):
+                    g = torch.as_tensor(g, dtype=pred.dtype, device=pred.device)
+                if g.ndim == 0:
+                    g = g.view(1).repeat(batch_size)
+                scale_factor = g.view(-1, 1)
+                scale_tensor = g.view(-1, 1, 1)
+                dist = dist * scale_factor
+
+            centroid = data_dict.get("centroid", torch.zeros(batch_size, 3, dtype=pred.dtype, device=pred.device))
+            if not torch.is_tensor(centroid):
+                centroid = torch.as_tensor(centroid, dtype=pred.dtype, device=pred.device)
+            if centroid.ndim == 1:
+                centroid = centroid.view(1, 3).repeat(batch_size, 1)
+            centroid = centroid.view(-1, 1, 3)
+
+            if args.save_keypoints:
+                pred_world = pred * scale_tensor + centroid
+                target_world = target * scale_tensor + centroid
+                sample_names = get_sample_names(data_dict, sample_cursor, batch_size)
+                pred_world_np = pred_world.cpu().numpy()
+                target_world_np = target_world.cpu().numpy()
+                for local_idx in range(batch_size):
+                    keypoint_records.append(
+                        dict(
+                            sample_index=sample_cursor + local_idx,
+                            sample_id=sample_names[local_idx],
+                            pred=pred_world_np[local_idx],
+                            target=target_world_np[local_idx],
+                        )
+                    )
+            sample_cursor += batch_size
 
             all_errors.append(dist.cpu().numpy())
 
@@ -310,6 +438,10 @@ def inference_batch(cfg, model, dataset, args):
     print("-" * 65)
     print(f"{'OVERALL':<15} | {total_mean:.5f}")
     print("-" * 65)
+
+    if args.save_keypoints:
+        save_path = build_keypoint_save_path(args, cfg, "batch")
+        save_keypoint_records(keypoint_records, save_path, args, cfg, prediction_type="direct")
 
     # [新增] 调用绘图函数
     print("=> Plotting error distribution...")
@@ -585,6 +717,110 @@ KP 5            | 65.38675            | 28.30660
 -----------------------------------------------------------------
 OVERALL         | 57.19871
 -----------------------------------------------------------------
+
+
+## 基于ptv3的直接预测关键点坐标推理
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_ptv3.py \
+    --weights exp/direct_keypoint_ptv3_0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 62.61232            | 33.31256
+KP 1            | 54.66961            | 27.32151
+KP 2            | 65.57172            | 32.64116
+KP 3            | 57.85198            | 32.07655
+KP 4            | 54.94345            | 25.19389
+KP 5            | 53.38654            | 24.51224
+-----------------------------------------------------------------
+OVERALL         | 58.17260
+-----------------------------------------------------------------
+=> Plotting error distribution...
+
+## 基于swin3d的直接预测关键点坐标推理
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_swin3d.py \
+    --weights exp/direct_keypoint_swin3d0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 43.94058            | 25.11047
+KP 1            | 39.96943            | 27.45842
+KP 2            | 41.52720            | 32.45487
+KP 3            | 38.65942            | 25.45163
+KP 4            | 39.21009            | 25.05678
+KP 5            | 42.70633            | 21.12778
+-----------------------------------------------------------------
+OVERALL         | 41.00217
+-----------------------------------------------------------------
+
+## 基于octformer的直接预测关键点坐标推理
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_octformer.py \
+    --weights exp/direct_keypoint_octformer0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --sphere-radius 0.02 \
+    --cube-size 0.02
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 67.97636            | 38.20079
+KP 1            | 60.30342            | 30.08042
+KP 2            | 68.40017            | 36.33193
+KP 3            | 60.04886            | 33.48549
+KP 4            | 59.14377            | 28.29335
+KP 5            | 63.58735            | 27.45408
+-----------------------------------------------------------------
+OVERALL         | 63.24333
+-----------------------------------------------------------------
+
+## ptv3
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_ptv3.py \
+    --weights exp/direct_keypoint_ptv3_0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --save-keypoints \
+    --save-dir outputs/keypoints \
+    --save-name ptv3_direct.txt
+
+## swin3d
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_swin3d.py \
+    --weights exp/direct_keypoint_swin3d0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --save-keypoints \
+    --save-dir outputs/keypoints \
+    --save-name swin3d_direct.txt
+
+## octformer
+python tools/inference.py \
+    --config-file configs/my_dataset/keypoint_octformer.py \
+    --weights exp/direct_keypoint_octformer0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --save-keypoints \
+    --save-dir outputs/keypoints \
+    --save-name octformer_direct.txt
 """
 if __name__ == "__main__":
     main()

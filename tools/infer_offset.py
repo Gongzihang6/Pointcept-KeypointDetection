@@ -14,6 +14,7 @@ import torch
 import open3d as o3d
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from datetime import datetime
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -37,12 +38,15 @@ def get_args():
     
     # 可视化参数
     parser.add_argument("--visualize", action="store_true", help="是否开启 Open3D 可视化 (仅单样本模式有效)")
-    parser.add_argument("--sphere-radius", type=float, default=10, help="真实关键点(球)的半径")
-    parser.add_argument("--cube-size", type=float, default=10, help="预测关键点(正方体)的边长")
+    parser.add_argument("--sphere-radius", type=float, default=20, help="真实关键点(球)的半径")
+    parser.add_argument("--cube-size", type=float, default=30, help="预测关键点(正方体)的边长")
+    parser.add_argument("--cube-wire-radius", type=float, default=1.5, help="预测关键点线框正方体的圆柱线半径")
     parser.add_argument("--point-size", type=float, default=2.0, help="Open3D 可视化时点云的点大小")
     parser.add_argument("--agg-method", choices=["argmax", "weighted"], default="argmax", help="关键点聚合策略：'argmax'（置信度最高点） 或 'weighted'（置信度大于阈值的点加权平均）")
     parser.add_argument("--mask-thresh", type=float, default=0.5, help="当 agg-method 为 weighted 时的掩码阈值")
     parser.add_argument("--save-dir", default=None, help="结果保存路径 (可选)")
+    parser.add_argument("--save-keypoints", action="store_true", help="是否保存预测关键点和真实关键点坐标")
+    parser.add_argument("--save-name", default=None, help="保存坐标的 txt 文件名；默认自动生成")
     
     args = parser.parse_args()
     return args
@@ -66,6 +70,74 @@ def setup_model(cfg, weights_path):
     model.eval()
     return model
 
+def get_sample_names(data_dict, start_idx, batch_size):
+    """从 batch 中提取样本名，失败时回退到 sample_序号。"""
+    names = data_dict.get("name", None)
+    fallback = [f"sample_{start_idx + i}" for i in range(batch_size)]
+    if names is None:
+        return fallback
+    if isinstance(names, np.ndarray):
+        names = names.tolist()
+    if isinstance(names, torch.Tensor):
+        names = names.detach().cpu().tolist()
+    if isinstance(names, (list, tuple)):
+        names = [str(name) for name in names]
+        if len(names) == batch_size:
+            return names
+        return names + fallback[len(names):]
+    if batch_size == 1:
+        return [str(names)]
+    return fallback
+
+def sanitize_filename(name):
+    keep = []
+    for ch in str(name):
+        keep.append(ch if ch.isalnum() or ch in ("-", "_", ".") else "_")
+    return "".join(keep).strip("_") or "keypoints"
+
+def build_keypoint_save_path(args, cfg, mode):
+    if not args.save_keypoints:
+        return None
+    if args.save_dir is None:
+        raise ValueError("--save-keypoints requires --save-dir to specify the output directory.")
+    os.makedirs(args.save_dir, exist_ok=True)
+    if args.save_name:
+        filename = args.save_name
+    else:
+        model_name = sanitize_filename(cfg.model.type)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{model_name}_{args.subset}_{mode}_{timestamp}_keypoints.txt"
+    if not filename.endswith(".txt"):
+        filename += ".txt"
+    return os.path.join(args.save_dir, sanitize_filename(filename))
+
+def save_keypoint_records(records, save_path, args, cfg, prediction_type):
+    if save_path is None:
+        return
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write("# Keypoint prediction export\n")
+        f.write(f"# prediction_type={prediction_type}\n")
+        f.write(f"# config_file={args.config_file}\n")
+        f.write(f"# weights={args.weights}\n")
+        f.write(f"# subset={args.subset}\n")
+        f.write(f"# model_type={cfg.model.type}\n")
+        f.write(f"# agg_method={args.agg_method}\n")
+        f.write(f"# mask_thresh={args.mask_thresh}\n")
+        f.write("# columns are tab-separated\n")
+        f.write("sample_index\tsample_id\tkeypoint_id\tpred_x\tpred_y\tpred_z\tgt_x\tgt_y\tgt_z\terror\n")
+        for record in records:
+            pred = np.asarray(record["pred"], dtype=np.float64)
+            target = np.asarray(record["target"], dtype=np.float64)
+            errors = np.linalg.norm(pred - target, axis=-1)
+            for kp_idx, (pred_xyz, target_xyz, error) in enumerate(zip(pred, target, errors)):
+                f.write(
+                    f"{record['sample_index']}\t{record['sample_id']}\t{kp_idx}\t"
+                    f"{pred_xyz[0]:.8f}\t{pred_xyz[1]:.8f}\t{pred_xyz[2]:.8f}\t"
+                    f"{target_xyz[0]:.8f}\t{target_xyz[1]:.8f}\t{target_xyz[2]:.8f}\t"
+                    f"{error:.8f}\n"
+                )
+    print(f"=> Saved keypoint predictions and GT to: {save_path}")
+
 def create_colored_mesh(geometry_type, center, color, size):
     """创建带颜色的几何体 (球或立方体)"""
     if geometry_type == 'sphere':
@@ -78,6 +150,84 @@ def create_colored_mesh(geometry_type, center, color, size):
     mesh.translate(center)
     mesh.paint_uniform_color(color)
     return mesh
+
+
+def is_valid_point(point):
+    point = np.asarray(point)
+    return point.shape == (3,) and np.all(np.isfinite(point))
+
+
+def align_cylinder(p1, p2, radius, color):
+    """
+    生成连接两点 (p1, p2) 的具有实体厚度的圆柱体
+    """
+    p1 = np.array(p1)
+    p2 = np.array(p2)
+    v = p2 - p1
+    length = np.linalg.norm(v)
+    if length < 1e-8:
+        return None
+    
+    # 创建基础圆柱体 (默认沿 Z 轴)
+    cylinder = o3d.geometry.TriangleMesh.create_cylinder(radius=radius, height=length)
+    
+    # 计算旋转矩阵，将 Z 轴对齐到向量 v 的方向
+    z_axis = np.array([0, 0, 1])
+    dir_vec = v / length
+    axis = np.cross(z_axis, dir_vec)
+    axis_norm = np.linalg.norm(axis)
+    
+    if axis_norm < 1e-6:
+        # 平行的情况 (同向或反向)
+        if np.dot(z_axis, dir_vec) < 0:
+            R = cylinder.get_rotation_matrix_from_xyz((np.pi, 0, 0))
+            cylinder.rotate(R, center=(0,0,0))
+    else:
+        # 一般情况，计算旋转轴和旋转角
+        axis = axis / axis_norm
+        angle = np.arccos(np.clip(np.dot(z_axis, dir_vec), -1.0, 1.0))
+        R = cylinder.get_rotation_matrix_from_axis_angle(axis * angle)
+        cylinder.rotate(R, center=(0,0,0))
+    
+    # 平移到两点的中点
+    midpoint = (p1 + p2) / 2.0
+    cylinder.translate(midpoint)
+    cylinder.paint_uniform_color(color)
+    cylinder.compute_vertex_normals()
+    
+    return cylinder
+
+def create_thick_wireframe_box(center, size, color, cylinder_radius=1.5):
+    """
+    创建由 12 根圆柱体拼接而成的实体线框正方体
+    """
+    half_s = size / 2.0
+    # 定义正方体的 8 个顶点相对坐标，并平移到中心
+    points = np.array([
+        [-half_s, -half_s, -half_s], [half_s, -half_s, -half_s],
+        [-half_s, half_s, -half_s],  [half_s, half_s, -half_s],
+        [-half_s, -half_s, half_s],  [half_s, -half_s, half_s],
+        [-half_s, half_s, half_s],   [half_s, half_s, half_s]
+    ]) + center
+    
+    # 12 条边的顶点索引
+    edges = [
+        [0, 1], [0, 2], [1, 3], [2, 3], # 底面
+        [4, 5], [4, 6], [5, 7], [6, 7], # 顶面
+        [0, 4], [1, 5], [2, 6], [3, 7]  # 侧面
+    ]
+    
+    # 创建一个空的 TriangleMesh 用于合并所有圆柱体
+    thick_wireframe = o3d.geometry.TriangleMesh()
+    
+    for edge in edges:
+        p1, p2 = points[edge[0]], points[edge[1]]
+        cylinder = align_cylinder(p1, p2, radius=cylinder_radius, color=color)
+        if cylinder is not None:
+            thick_wireframe += cylinder # 合并网格
+        
+    thick_wireframe.compute_vertex_normals()
+    return thick_wireframe
 
 def visualize_single(coord, pred_kps, target_kps, args, num_kps, active_points_info=None):
     """使用 Open3D 可视化 (支持调整点大小，点云特定高亮着色)"""
@@ -110,6 +260,7 @@ def visualize_single(coord, pred_kps, target_kps, args, num_kps, active_points_i
 
     # 3. 绘制关键点（真实值：球；预测值：立方体）
     for i in range(num_kps):
+        color = np.array(colors[i])
         # 真实值：圆球 (Sphere)
         try:
             if target_kps is not None and not np.any(np.isnan(target_kps[i])):
@@ -119,13 +270,28 @@ def visualize_single(coord, pred_kps, target_kps, args, num_kps, active_points_i
             # 容错：若 target_kps 不可用则忽略
             pass
 
-        # 预测值：正方体 (Cube)
+        # 预测值 (Pred)：具有实体厚度的加粗线框
         try:
-            if pred_kps is not None and not np.any(np.isnan(pred_kps[i])):
-                cube = create_colored_mesh('box', np.asarray(pred_kps[i]), colors[i], args.cube_size)
-                geometries.append(cube)
-        except Exception:
-            pass
+            if pred_kps is not None and is_valid_point(pred_kps[i]):
+                thick_cube = create_thick_wireframe_box(
+                    np.asarray(pred_kps[i]),
+                    args.cube_size,
+                    color,
+                    cylinder_radius=args.cube_wire_radius,
+                )
+                geometries.append(thick_cube)
+        except Exception as exc:
+            print(f"=> Warning: failed to draw predicted wireframe cube for KP {i}: {exc}")
+        # [新增] 误差辅助线：只有当 GT 和 Pred 都存在时才画线
+        if target_kps is not None and pred_kps is not None and is_valid_point(target_kps[i]) and is_valid_point(pred_kps[i]):
+            line_points = [target_kps[i], pred_kps[i]]
+            lines = [[0, 1]]
+            line_set = o3d.geometry.LineSet()
+            line_set.points = o3d.utility.Vector3dVector(line_points)
+            line_set.lines = o3d.utility.Vector2iVector(lines)
+            # 连线统一用鲜艳的红色或对比色，方便观察偏移方向
+            line_set.colors = o3d.utility.Vector3dVector([[1.0, 0.0, 0.0]]) 
+            geometries.append(line_set)
 
     # 4. [修改核心] 使用 Visualizer 来控制渲染选项
     vis = o3d.visualization.Visualizer()
@@ -139,7 +305,7 @@ def visualize_single(coord, pred_kps, target_kps, args, num_kps, active_points_i
     opt = vis.get_render_option()
     opt.point_size = args.point_size        # [关键] 设置点的大小
     opt.background_color = np.asarray([1, 1, 1]) # [可选] 设置背景为白色，看起来更清晰
-    
+    opt.line_width = 3.0 # 设置线框的粗细
     vis.run()
     vis.destroy_window()
 
@@ -241,8 +407,8 @@ def inference_single_sample(cfg, model, dataset, args):
             target_kp_coord = true_coord[best_idx_gt] + target_offset[best_idx_gt, k] * scale
             target_kps[k] = target_kp_coord
         else:
-            # 数据集中该关键点没有有效前景点！跳过或设为0
-            target_kps[k] = pred_kps[k] # 用预测值充当防止画图时爆炸，或者可以填 nan
+            # 缺失 GT 时保留 NaN，避免把预测值当成 GT 产生人为的零误差。
+            target_kps[k] = np.nan
 
     # 计算距离误差
     dist = np.linalg.norm(pred_kps - target_kps, axis=-1)
@@ -250,7 +416,18 @@ def inference_single_sample(cfg, model, dataset, args):
     print(f"\n[{args.subset} set, item {idx}] ({data_dict.get('name', ['Unknown'])[0]})")
     for i in range(num_kps):
         print(f"  KP {i}: Erro = {dist[i]:.4f}mm | Pred = {pred_kps[i].round(4)} | GT = {target_kps[i].round(4)}")
-    print(f"  --> Mean Error = {dist.mean():.4f}mm")
+    print(f"  --> Mean Error = {np.nanmean(dist):.4f}mm")
+
+    if args.save_keypoints:
+        sample_name = get_sample_names(data_dict, idx, 1)[0]
+        save_path = build_keypoint_save_path(args, cfg, "single")
+        save_keypoint_records(
+            [dict(sample_index=idx, sample_id=sample_name, pred=pred_kps, target=target_kps)],
+            save_path,
+            args,
+            cfg,
+            prediction_type="offset",
+        )
 
     # 可视化 (需要传真实空间的 coord)
     if args.visualize:
@@ -262,6 +439,10 @@ def plot_batch_errors(all_errors, num_kps):
     layout: 2行3列 (针对6个关键点)
     """
     import matplotlib.pyplot as plt
+
+    # 可视化前随机打乱样本顺序，避免原始数据顺序影响散点分布观感。
+    if all_errors.shape[0] > 1:
+        all_errors = all_errors[np.random.permutation(all_errors.shape[0])]
     
     # 设置绘图风格
     plt.style.use('ggplot')
@@ -274,7 +455,7 @@ def plot_batch_errors(all_errors, num_kps):
     # 展平 axes 方便索引
     axes = axes.flatten()
     
-    # 样本序号 (X轴)
+    # 打乱后的样本序号 (X轴)
     x = np.arange(all_errors.shape[0])
     
     for i in range(num_kps):
@@ -284,12 +465,13 @@ def plot_batch_errors(all_errors, num_kps):
         y = all_errors[:, i] # 第 i 个关键点的所有样本误差
         
         # 统计指标
-        mean_val = np.mean(y)
-        std_val = np.std(y)
+        mean_val = np.nanmean(y)
+        std_val = np.nanstd(y)
         upper_limit = mean_val + 2 * std_val
         
         # 1. 绘制散点
-        ax.scatter(x, y, alpha=0.6, s=10, c='blue', label='Sample Error')
+        valid = np.isfinite(y)
+        ax.scatter(x[valid], y[valid], alpha=0.6, s=10, c='blue', label='Sample Error')
         
         # 2. 绘制平均值虚线 (红色)
         ax.axhline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.4f}')
@@ -305,6 +487,13 @@ def plot_batch_errors(all_errors, num_kps):
         ax.grid(True, which='both', linestyle='--', alpha=0.7)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # 调整布局防止重叠
+    # --- 新增功能：保存高分辨率图片 ---
+    save_path = "results/batch_keypoint_errors.svg"
+    dpi=1200
+    if save_path is not None:
+        # bbox_inches='tight' 用于去除图片周围多余的白边
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+        print(f"图表已成功保存至: {save_path} (DPI: {dpi})")
     plt.show() # 弹出窗口
 
 def inference_batch(cfg, model, dataset, args):
@@ -321,6 +510,8 @@ def inference_batch(cfg, model, dataset, args):
 
     num_kps = cfg.model.num_keypoints
     all_errors = [] # 存储所有样本所有关键点的误差
+    keypoint_records = []
+    sample_cursor = 0
 
     model.eval()
     with torch.no_grad():
@@ -359,7 +550,7 @@ def inference_batch(cfg, model, dataset, args):
             centroid = data_dict.get("centroid", torch.zeros(num_samples, 3, device=coord.device))
             
             pred_kps_batch = torch.zeros(num_samples, num_kps, 3, device=coord.device)
-            target_kps_batch = torch.zeros(num_samples, num_kps, 3, device=coord.device)
+            target_kps_batch = torch.full((num_samples, num_kps, 3), float("nan"), device=coord.device)
             
             for b_idx in range(num_samples):
                 # 获取该样本的 Mask
@@ -407,20 +598,33 @@ def inference_batch(cfg, model, dataset, args):
                         best_idx_gt = valid_indices[0]
                         target_kp_coord = s_true_coord[best_idx_gt] + s_target_off[best_idx_gt, k] * s_scale
                         target_kps_batch[b_idx, k] = target_kp_coord
-                    else:
-                        target_kps_batch[b_idx, k] = pred_kp_coord
             
             # 计算欧氏距离
             dist = torch.norm(pred_kps_batch - target_kps_batch, p=2, dim=-1) # (B, K)
             all_errors.append(dist.cpu().numpy())
 
+            if args.save_keypoints:
+                sample_names = get_sample_names(data_dict, sample_cursor, num_samples)
+                pred_kps_np = pred_kps_batch.cpu().numpy()
+                target_kps_np = target_kps_batch.cpu().numpy()
+                for local_idx in range(num_samples):
+                    keypoint_records.append(
+                        dict(
+                            sample_index=sample_cursor + local_idx,
+                            sample_id=sample_names[local_idx],
+                            pred=pred_kps_np[local_idx],
+                            target=target_kps_np[local_idx],
+                        )
+                    )
+            sample_cursor += num_samples
+
     # Concatenate all batches: (Total_Samples, K)
     all_errors = np.concatenate(all_errors, axis=0)
     
     # Statistics
-    mean_per_kp = np.mean(all_errors, axis=0)
-    std_per_kp = np.std(all_errors, axis=0)
-    total_mean = np.mean(all_errors)
+    mean_per_kp = np.nanmean(all_errors, axis=0)
+    std_per_kp = np.nanstd(all_errors, axis=0)
+    total_mean = np.nanmean(all_errors)
 
     print("\n====== Batch Inference Statistics ======")
     print(f"Total Samples: {all_errors.shape[0]}")
@@ -432,6 +636,10 @@ def inference_batch(cfg, model, dataset, args):
     print("-" * 65)
     print(f"{'OVERALL':<15} | {total_mean:.5f}")
     print("-" * 65)
+
+    if args.save_keypoints:
+        save_path = build_keypoint_save_path(args, cfg, "batch")
+        save_keypoint_records(keypoint_records, save_path, args, cfg, prediction_type="offset")
 
     # [新增] 调用绘图函数
     print("=> Plotting error distribution...")
@@ -499,7 +707,10 @@ python tools/infer_offset.py \
     --idx -1 \
     --visualize \
     --agg-method weighted \
-    --mask-thresh 0.8 
+    --mask-thresh 0.8 \
+    --save-keypoints \
+    --save-dir outputs/keypoints \
+    --save-name  ptv3_offset.txt
 #全样本误差 24.47934
 #训练集误差 13.83127
 #验证集误差 50.20841
@@ -574,7 +785,10 @@ python tools/infer_offset.py \
     --idx -1 \
     --visualize \
     --agg-method weighted \
-    --mask-thresh 0.8
+    --mask-thresh 0.8 \
+    --save-keypoints \
+    --save-dir outputs/keypoints \
+    --save-name  swin3d_offset.txt
 ### 全样本推理
 ====== Batch Inference Statistics ======
 Total Samples: 152
@@ -636,15 +850,18 @@ KP 5            | 40.57346            | 18.18356
 OVERALL         | 56.41934
 -----------------------------------------------------------------
 
-## 基于OctFormer模型的推理示例
+## 基于OctFormer模型的推理示例（R=300)
 python tools/infer_offset.py \
     --config-file configs/my_dataset/offset_keypoint_octformer.py \
     --weights exp/offset_keypoint_octformer_0512/model/model_best.pth \
-    --subset train \
-    --idx 25 \
+    --subset all \
+    --idx -1 \
     --visualize \
     --agg-method weighted \
-    --mask-thresh 0.8
+    --mask-thresh 0.5 \
+    --save-keypoints \
+    --save-dir outputs/keypoints \
+    --save-name  octformer_offset.txt
 ====== Batch Inference Statistics ======
 Total Samples: 152
 -----------------------------------------------------------------
@@ -673,6 +890,78 @@ KP 4            | 7.93249            | 3.73575
 KP 5            | 14.24255            | 7.28289
 -----------------------------------------------------------------
 OVERALL         | 9.53373
+-----------------------------------------------------------------
+
+## octformer设置半径R=100
+python tools/infer_offset.py \
+    --config-file configs/my_dataset/offset_keypoint_octformer.py \
+    --weights exp/offset_keypoint_octformer_0529/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --agg-method weighted \
+    --mask-thresh 0.8
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 426.04031            | 252.91177
+KP 1            | 177.47498            | 171.32773
+KP 2            | 172.42622            | 174.92284
+KP 3            | 351.86066            | 203.70782
+KP 4            | 514.02325            | 277.95557
+KP 5            | 15.55502            | 18.01666
+-----------------------------------------------------------------
+OVERALL         | 276.23010
+-----------------------------------------------------------------
+
+## octformer设置半径R=200(虽然效果好，但是过拟合明显)
+python tools/infer_offset.py \
+    --config-file configs/my_dataset/offset_keypoint_octformer.py \
+    --weights exp/offset_keypoint_octformer_0529v1/model/model_best.pth \
+    --subset all \
+    --idx 60 \
+    --visualize \
+    --agg-method weighted \
+    --mask-thresh 0.8
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 13.30709            | 19.14559
+KP 1            | 19.94459            | 31.65851
+KP 2            | 22.07256            | 36.70895
+KP 3            | 18.97061            | 25.74864
+KP 4            | 17.50271            | 27.29051
+KP 5            | 14.86118            | 18.07594
+-----------------------------------------------------------------
+OVERALL         | 17.77645
+-----------------------------------------------------------------
+
+## octformer设置半径R=400
+python tools/infer_offset.py \
+    --config-file configs/my_dataset/offset_keypoint_octformer.py \
+    --weights exp/offset_keypoint_octformer_0530/model/model_best.pth \
+    --subset all \
+    --idx -1 \
+    --visualize \
+    --agg-method weighted \
+    --mask-thresh 0.8
+====== Batch Inference Statistics ======
+Total Samples: 152
+-----------------------------------------------------------------
+Keypoint ID     | Mean Error           | Std Dev             
+-----------------------------------------------------------------
+KP 0            | 22.99101            | 21.97149
+KP 1            | 26.61954            | 27.52293
+KP 2            | 28.30157            | 33.79631
+KP 3            | 25.39908            | 24.98058
+KP 4            | 26.98810            | 24.12887
+KP 5            | 23.97778            | 18.13627
+-----------------------------------------------------------------
+OVERALL         | 25.71285
 -----------------------------------------------------------------
 """
 if __name__ == "__main__":

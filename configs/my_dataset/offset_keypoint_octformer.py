@@ -36,14 +36,22 @@ model = dict(
 # ======================================================================
 data_root = "KeyPointDataset_Split"
 grid_size_val = 0.02
+# Offset mask radius in the original point-cloud unit.
+# The old offline script used r=300.0, which corresponds to 30 cm when data is in mm.
+offset_radius = 300.0
 
 data = dict(
     train=dict(
         type="OffsetKeypointDataset",
         split="train",
         data_root=data_root,
+        offset_radius=offset_radius,
         transform=[
             dict(type="Update", keys_dict=dict(index_valid_keys=["coord", "feat", "target"], grid_size=grid_size_val)),
+            # dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
+            # dict(type="RandomScale", scale=[0.9, 1.1]),
+            # dict(type="RandomFlip", p=0.5),
+            # dict(type="RandomJitter", sigma=0.005, clip=0.02),
             dict(
                 type="GridSample",
                 grid_size=grid_size_val,
@@ -51,6 +59,7 @@ data = dict(
                 mode="train",
                 return_grid_coord=True,
             ),
+            dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -65,6 +74,7 @@ data = dict(
         type="OffsetKeypointDataset",
         split="val",
         data_root=data_root,
+        offset_radius=offset_radius,
         transform=[
             dict(type="Update", keys_dict=dict(index_valid_keys=["coord", "feat", "target"], grid_size=grid_size_val)),
             dict(
@@ -87,6 +97,7 @@ data = dict(
         type="OffsetKeypointDataset",
         split="test",
         data_root=data_root,
+        offset_radius=offset_radius,
         transform=[
             dict(type="Update", keys_dict=dict(index_valid_keys=["coord", "feat", "target"], grid_size=grid_size_val)),
             dict(

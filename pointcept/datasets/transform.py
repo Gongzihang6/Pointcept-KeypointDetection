@@ -267,6 +267,10 @@ class RandomRotate(object):
             data_dict["coord"] -= center
             data_dict["coord"] = np.dot(data_dict["coord"], np.transpose(rot_t))
             data_dict["coord"] += center
+        if "target" in data_dict.keys():
+            target = data_dict["target"]
+            if isinstance(target, np.ndarray) and target.ndim == 3 and target.shape[-1] >= 4:
+                data_dict["target"][..., :3] = np.dot(data_dict["target"][..., :3], np.transpose(rot_t))
         if "normal" in data_dict.keys():
             data_dict["normal"] = np.dot(data_dict["normal"], np.transpose(rot_t))
         return data_dict
@@ -306,6 +310,10 @@ class RandomRotateTargetAngle(object):
             data_dict["coord"] -= center
             data_dict["coord"] = np.dot(data_dict["coord"], np.transpose(rot_t))
             data_dict["coord"] += center
+        if "target" in data_dict.keys():
+            target = data_dict["target"]
+            if isinstance(target, np.ndarray) and target.ndim == 3 and target.shape[-1] >= 4:
+                data_dict["target"][..., :3] = np.dot(data_dict["target"][..., :3], np.transpose(rot_t))
         if "normal" in data_dict.keys():
             data_dict["normal"] = np.dot(data_dict["normal"], np.transpose(rot_t))
         return data_dict
@@ -323,6 +331,10 @@ class RandomScale(object):
                 self.scale[0], self.scale[1], 3 if self.anisotropic else 1
             )
             data_dict["coord"] *= scale
+            if "target" in data_dict.keys():
+                target = data_dict["target"]
+                if isinstance(target, np.ndarray) and target.ndim == 3 and target.shape[-1] >= 4:
+                    data_dict["target"][..., :3] *= scale
         return data_dict
 
 
@@ -332,16 +344,26 @@ class RandomFlip(object):
         self.p = p
 
     def __call__(self, data_dict):
-        if np.random.rand() < self.p:
+        flip_x = np.random.rand() < self.p
+        flip_y = np.random.rand() < self.p
+        if flip_x:
             if "coord" in data_dict.keys():
                 data_dict["coord"][:, 0] = -data_dict["coord"][:, 0]
             if "normal" in data_dict.keys():
                 data_dict["normal"][:, 0] = -data_dict["normal"][:, 0]
-        if np.random.rand() < self.p:
+            if "target" in data_dict.keys():
+                target = data_dict["target"]
+                if isinstance(target, np.ndarray) and target.ndim == 3 and target.shape[-1] >= 4:
+                    data_dict["target"][..., 0] = -data_dict["target"][..., 0]
+        if flip_y:
             if "coord" in data_dict.keys():
                 data_dict["coord"][:, 1] = -data_dict["coord"][:, 1]
             if "normal" in data_dict.keys():
                 data_dict["normal"][:, 1] = -data_dict["normal"][:, 1]
+            if "target" in data_dict.keys():
+                target = data_dict["target"]
+                if isinstance(target, np.ndarray) and target.ndim == 3 and target.shape[-1] >= 4:
+                    data_dict["target"][..., 1] = -data_dict["target"][..., 1]
         return data_dict
 
 
@@ -360,6 +382,10 @@ class RandomJitter(object):
                 self.clip,
             )
             data_dict["coord"] += jitter
+            if "target" in data_dict.keys():
+                target = data_dict["target"]
+                if isinstance(target, np.ndarray) and target.ndim == 3 and target.shape[-1] >= 4:
+                    data_dict["target"][..., :3] -= jitter[:, None, :]
         return data_dict
 
 

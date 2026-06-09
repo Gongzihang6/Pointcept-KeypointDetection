@@ -52,14 +52,23 @@ num_worker=4
 batch_size=4
 data_root = "KeyPointDataset_Split"
 grid_size_val = 0.02
+offset_radius = 300.0
+online_offset = True
 data = dict(
     train=dict(
         type="OffsetKeypointDataset",
         split="train",
         data_root=data_root,
+        offset_radius=offset_radius,
+        online_offset=online_offset,
         transform=[
             dict(type="Update", keys_dict=dict(index_valid_keys=["coord", "feat", "target"], grid_size=grid_size_val)),
+            # dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
+            # dict(type="RandomScale", scale=[0.9, 1.1]),
+            # dict(type="RandomFlip", p=0.5),
+            # dict(type="RandomJitter", sigma=0.005, clip=0.02),
             dict(type="GridSample", grid_size=grid_size_val, hash_type="fnv", mode="train", return_grid_coord=True),
+            dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(type="Collect", 
                  keys=("coord", "grid_coord", "feat", "target", "grid_size", "scale"), 
@@ -72,6 +81,8 @@ data = dict(
         type="OffsetKeypointDataset",
         split="val",
         data_root=data_root,
+        offset_radius=offset_radius,
+        online_offset=online_offset,
         transform=[
             dict(type="Update", keys_dict=dict(index_valid_keys=["coord", "feat", "target"], grid_size=grid_size_val)),
             dict(type="GridSample", grid_size=grid_size_val, hash_type="fnv", mode="train", return_grid_coord=True),
@@ -86,6 +97,8 @@ data = dict(
         type="OffsetKeypointDataset",
         split="test",
         data_root=data_root,
+        offset_radius=offset_radius,
+        online_offset=online_offset,
         transform=[
             dict(type="Update", keys_dict=dict(index_valid_keys=["coord", "feat", "target"], grid_size=grid_size_val)),
             dict(type="GridSample", grid_size=grid_size_val, hash_type="fnv", mode="train", return_grid_coord=True),
@@ -111,5 +124,5 @@ hooks = [
     
     # 根据新的 label 格式，可能需要重写这部分 Evaluator 
     dict(type="OffsetKeypointEvaluator"),
-    dict(type="CheckpointSaver", save_freq=5)
+    dict(type="CheckpointSaver", save_freq=20)
 ]
